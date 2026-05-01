@@ -1,13 +1,29 @@
-# @lxj/eval-shared
+# eval-shared
 
 > PromptFoo 评估共享工具包 — 所有项目仓库的基础设施。
 
+## 前置条件
+
+使用本项目前，请确保你的环境满足以下要求：
+
+| 依赖 | 是否必须 | 说明 |
+|------|----------|------|
+| [Langfuse](https://langfuse.com) | ✅ 必须 | 作为 Prompt 管理和 Dataset 数据源，所有 CLI 工具（同步数据集、同步 Prompt、提升版本）均依赖 Langfuse API |
+| [PromptFoo](https://www.promptfoo.dev) | ✅ 必须 | 核心评估引擎，负责运行测试、评分和生成报告 |
+| [Node.js](https://nodejs.org) ≥ 18 | ✅ 必须 | 运行 CLI 脚本和 PromptFoo 的基础环境 |
+| LLM API | ✅ 必须 | 至少需要一个可用的大模型 API（OpenAI、通义千问、文心一言等均可），用于 PromptFoo 的 Provider 和 LLM-as-Judge 评分 |
+| [LiteLLM](https://litellm.ai) | ⬜ 可选 | 如果你需要统一代理多个模型 API，推荐使用；不用也行，PromptFoo 可直接对接模型 API |
+| [DSPy](https://dspy.ai) | ⬜ 可选 | 仅在需要自动优化 Prompt 时使用，`export-to-dspy` 命令会用到 |
+
+> 💡 **最小启动组合**：Langfuse + PromptFoo + 任意一个 LLM API，即可跑通完整的评估流程。
+
 ## 目录
 
+- [前置条件](#前置条件)
 - [架构概览](#架构概览)
 - [安装](#安装)
 - [目录结构](#目录结构)
-- [快速开始：初始化一个新项目仓库](#快速开始初始化一个新项目仓库)
+- [快速开始：初始化一个新的 PromptFoo 评估项目](#快速开始初始化一个新的-promptfoo-评估项目)
 - [Rubric 详解](#rubric-详解)
 - [CLI 命令详解](#cli-命令详解)
 - [模板文件说明](#模板文件说明)
@@ -21,17 +37,19 @@
 
 ## 架构概览
 
-本项目是 Multi-repo 评估体系中的**共享基础设施层**。各业务项目（如 `eval-order`、`eval-cs`）通过 npm 依赖安装本包，获得统一的 Rubric、CLI 工具和项目模板。
+本项目是 Multi-repo 评估体系中的**共享基础设施层**。各业务线的 PromptFoo 评估项目（如 `eval-order`、`eval-cs`）通过 npm 依赖安装本包，获得统一的 Rubric、CLI 工具和项目模板。
+
+> **什么是「评估项目」？** 每个评估项目是一个独立的 Git 仓库，使用 [PromptFoo](https://www.promptfoo.dev) 对特定业务线的 AI Agent 进行自动化测试和质量评估。一个评估项目可以包含多个 Agent 的测试配置。
 
 ```mermaid
 graph TB
     subgraph shared["eval-shared（本仓库）"]
-        R["rubrics/<br/>通用断言"] ~~~ S["scripts/<br/>CLI 工具"] ~~~ T["templates/<br/>项目初始化模板"]
+        R["rubrics/<br/>通用断言"] ~~~ S["scripts/<br/>CLI 工具"] ~~~ T["templates/<br/>评估项目初始化模板"]
     end
 
-    shared -->|npm install| A["eval-order<br/>订单项目"]
-    shared -->|npm install| B["eval-cs<br/>客服项目"]
-    shared -->|npm install| C["eval-xxx<br/>更多项目…"]
+    shared -->|npm install| A["eval-order<br/>订单评估项目"]
+    shared -->|npm install| B["eval-cs<br/>客服评估项目"]
+    shared -->|npm install| C["eval-xxx<br/>更多评估项目…"]
 ```
 
 **核心定位**：只承载 **≥ 2 个项目需要** 的通用能力，避免过度抽象。
@@ -40,10 +58,10 @@ graph TB
 
 ## 安装
 
-在你的项目仓库中执行：
+在你的 PromptFoo 评估项目中执行：
 
 ```bash
-npm install --save-dev @lxj/eval-shared
+npm install --save-dev eval-shared
 ```
 
 安装完成后：
@@ -57,7 +75,7 @@ npm install --save-dev @lxj/eval-shared
 ```
 eval-shared/
 │
-├── package.json                        # 包名：@lxj/eval-shared
+├── package.json                        # 包名：eval-shared
 ├── README.md                           # 本文档
 │
 ├── rubrics/                            # 📋 通用 Rubric 模板
@@ -72,7 +90,7 @@ eval-shared/
 │   ├── export-to-dspy.js               #   Dataset → dspy.Example 格式
 │   └── promote-prompt.js               #   Prompt staging → production
 │
-└── templates/                          # 📐 项目仓库初始化模板
+└── templates/                          # 📐 PromptFoo 评估项目初始化模板
     ├── promptfooconfig.template.yaml   #   Agent 测试配置模板
     ├── redteam.template.yaml           #   红队安全测试模板
     ├── .env.example                    #   环境变量模板
@@ -81,9 +99,9 @@ eval-shared/
 
 ---
 
-## 快速开始：初始化一个新项目仓库
+## 快速开始：初始化一个新的 PromptFoo 评估项目
 
-以新建 `eval-order`（订单项目评估仓库）为例，完整走一遍流程：
+以新建 `eval-order`（订单业务线的 PromptFoo 评估项目）为例，完整走一遍从零到可运行测试的流程：
 
 ### Step 1：创建仓库并初始化
 
@@ -96,15 +114,15 @@ npm init -y
 ### Step 2：安装依赖
 
 ```bash
-npm install --save-dev promptfoo @lxj/eval-shared
+npm install --save-dev promptfoo eval-shared
 ```
 
 ### Step 3：从模板复制基础文件
 
 ```bash
 # 复制环境变量模板和 gitignore
-cp node_modules/@lxj/eval-shared/templates/.env.example .env.example
-cp node_modules/@lxj/eval-shared/templates/.gitignore .gitignore
+cp node_modules/eval-shared/templates/.env.example .env.example
+cp node_modules/eval-shared/templates/.gitignore .gitignore
 
 # 复制 .env.example 为 .env，并填入真实密钥
 cp .env.example .env
@@ -125,10 +143,10 @@ touch output/.gitkeep
 从模板复制并修改：
 
 ```bash
-cp node_modules/@lxj/eval-shared/templates/promptfooconfig.template.yaml \
+cp node_modules/eval-shared/templates/promptfooconfig.template.yaml \
    agents/intent-agent/promptfooconfig.yaml
 
-cp node_modules/@lxj/eval-shared/templates/redteam.template.yaml \
+cp node_modules/eval-shared/templates/redteam.template.yaml \
    agents/intent-agent/redteam.yaml
 ```
 
@@ -222,14 +240,14 @@ Rubric 是可复用的断言（assert）集合，通过 `$ref` 语法在项目�
 # 引用整个 assert 数组
 defaultTest:
   assert:
-    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
 
 # 也可以同时引用多个 Rubric
 defaultTest:
   assert:
-    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
-    - $ref: node_modules/@lxj/eval-shared/rubrics/quality.yaml#/assert
-    - $ref: node_modules/@lxj/eval-shared/rubrics/tone.yaml#/assert
+    - $ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/eval-shared/rubrics/quality.yaml#/assert
+    - $ref: node_modules/eval-shared/rubrics/tone.yaml#/assert
 ```
 
 ### 可用 Rubric 一览
@@ -246,7 +264,7 @@ defaultTest:
 
 ```yaml
 # 引用方式
-- $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
+- $ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
 ```
 
 #### `quality.yaml` — 通用回复质量
@@ -254,7 +272,7 @@ defaultTest:
 从四个维度评估回复：意图理解、信息完整、语气得体、简洁清晰。
 
 ```yaml
-- $ref: node_modules/@lxj/eval-shared/rubrics/quality.yaml#/assert
+- $ref: node_modules/eval-shared/rubrics/quality.yaml#/assert
 ```
 
 #### `format-json.yaml` — JSON 格式规范
@@ -262,7 +280,7 @@ defaultTest:
 适用于需要输出 JSON 的 Agent。包含 `is-json` 硬性断言 + LLM 语义检查（字段完整性、类型正确性）。
 
 ```yaml
-- $ref: node_modules/@lxj/eval-shared/rubrics/format-json.yaml#/assert
+- $ref: node_modules/eval-shared/rubrics/format-json.yaml#/assert
 ```
 
 #### `tone.yaml` — 语气 / 专业度
@@ -270,7 +288,7 @@ defaultTest:
 评估回复的语气友好度、用词专业性、角色一致性。适用于面向终端用户的 Agent。
 
 ```yaml
-- $ref: node_modules/@lxj/eval-shared/rubrics/tone.yaml#/assert
+- $ref: node_modules/eval-shared/rubrics/tone.yaml#/assert
 ```
 
 ### 项目特有断言
@@ -282,7 +300,7 @@ defaultTest:
 defaultTest:
   assert:
     # 共享 Rubric
-    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
     # 项目特有
     - type: contains
       value: "订单号"
@@ -371,7 +389,7 @@ npm run promote -- --agent intent-agent
 
 ## 模板文件说明
 
-`templates/` 目录包含初始化新项目仓库时所需的模板文件。
+`templates/` 目录包含初始化新的 PromptFoo 评估项目时所需的模板文件。每当你为一条新的业务线创建评估仓库时，从这里复制模板作为起点。
 
 ### `promptfooconfig.template.yaml`
 
@@ -536,13 +554,13 @@ steps:
 
 ```bash
 # 查看当前版本
-npm list @lxj/eval-shared
+npm list eval-shared
 
 # 升级到最新兼容版本
-npm update @lxj/eval-shared
+npm update eval-shared
 
 # 升级到指定版本（破坏性变更时）
-npm install --save-dev @lxj/eval-shared@^2.0.0
+npm install --save-dev eval-shared@^2.0.0
 ```
 
 **原则**：
@@ -560,7 +578,7 @@ npm install --save-dev @lxj/eval-shared@^2.0.0
 
 ```yaml
 # ✅ 正确
-- $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
+- $ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
 
 # ❌ 错误 — 不要用相对路径
 - $ref: ../../eval-shared/rubrics/safety.yaml#/assert
