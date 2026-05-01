@@ -1,3 +1,5 @@
+**中文** | [English](./README_EN.md)
+
 # eval-shared
 
 > PromptFoo 评估共享工具包 — 所有项目仓库的基础设施。
