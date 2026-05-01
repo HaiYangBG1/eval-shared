@@ -24,8 +24,9 @@
 本项目是 Multi-repo 评估体系中的**共享基础设施层**。各业务项目（如 `eval-order`、`eval-cs`）通过 npm 依赖安装本包，获得统一的 Rubric、CLI 工具和项目模板。
 
 ```mermaid
-graph TD
+graph TB
     subgraph shared["eval-shared（本仓库）"]
+        direction LR
         R["rubrics/<br/>通用断言"]
         S["scripts/<br/>CLI 工具"]
         T["templates/<br/>项目初始化模板"]
