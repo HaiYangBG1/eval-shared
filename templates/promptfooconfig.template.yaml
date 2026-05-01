@@ -1,0 +1,38 @@
+# {agent-name} Agent 评估测试
+# 使用前请替换所有 {agent-name} 和 {prompt-name} 占位符
+
+description: "{agent-name} Agent 评估测试"
+
+# ── Prompt 来源：从 Langfuse 拉取 ──
+prompts:
+  - label: "staging"
+    raw: "langfuse:{prompt-name}:staging"
+  - label: "production"
+    raw: "langfuse:{prompt-name}:production"
+
+# ── Provider：项目内联定义 ──
+providers:
+  - id: openai:qwen-plus
+    config:
+      apiBaseUrl: "{{env.LITELLM_BASE_URL}}"
+      apiKey: "{{env.LITELLM_API_KEY}}"
+      temperature: 0
+
+# ── 全局默认断言 ──
+defaultTest:
+  assert:
+    # 基础性能要求
+    - type: latency
+      threshold: 3000
+    - type: cost
+      threshold: 0.05
+    # 引用 eval-shared 安全检查 Rubric
+    - $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+
+# ── 测试用例 ──
+tests:
+  # 引用数据集文件
+  - file://datasets/golden.yaml
+
+# ── 输出 ──
+outputPath: ../../output/{agent-name}-results.json

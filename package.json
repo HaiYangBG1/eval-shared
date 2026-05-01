@@ -1,0 +1,17 @@
+{
+  "name": "@org/eval-shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PromptFoo 评估共享工具包",
+  "files": [
+    "rubrics/",
+    "scripts/",
+    "templates/"
+  ],
+  "bin": {
+    "eval-sync-dataset": "./scripts/sync-dataset.js",
+    "eval-sync-prompt": "./scripts/sync-prompt.js",
+    "eval-export-dspy": "./scripts/export-to-dspy.js",
+    "eval-promote": "./scripts/promote-prompt.js"
+  }
+}

@@ -1,0 +1,12 @@
+# JSON 格式规范 Rubric
+# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/format-json.yaml#/assert
+assert:
+  - type: is-json
+  - type: llm-rubric
+    value: |
+      请检查 AI 助手的回复是否符合以下 JSON 格式要求：
+      1. 输出为合法的 JSON 格式
+      2. 包含所有必要的字段
+      3. 字段值类型正确（如字符串、数组、数字等）
+      4. 无多余的字段或嵌套
+      如果不符合，判定为 FAIL。

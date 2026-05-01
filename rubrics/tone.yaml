@@ -1,0 +1,11 @@
+# 语气 / 专业度 Rubric
+# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/tone.yaml#/assert
+assert:
+  - type: llm-rubric
+    value: |
+      请评估 AI 助手的回复语气和专业度：
+      1. 语气是否友好、礼貌，避免生硬或机械感
+      2. 用词是否专业准确，避免口语化或模糊表述
+      3. 是否保持了一致的角色人设（如客服、助手等）
+      4. 是否在适当时使用了礼貌用语（如"请"、"您"等）
+      如果语气不当或明显不专业，判定为 FAIL。

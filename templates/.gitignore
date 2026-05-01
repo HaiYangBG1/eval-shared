@@ -1,0 +1,12 @@
+# 密钥
+.env
+
+# 依赖
+node_modules/
+
+# 测试结果
+output/
+*.output.json
+
+# PromptFoo 缓存
+.promptfoo/

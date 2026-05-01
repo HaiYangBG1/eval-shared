@@ -1,0 +1,11 @@
+# 通用回复质量 Rubric
+# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/quality.yaml#/assert
+assert:
+  - type: llm-rubric
+    value: |
+      请评估 AI 助手的回复质量，从以下维度判断：
+      1. 意图理解：是否正确识别了用户意图
+      2. 信息完整：是否提供了必要的信息或操作指引
+      3. 语气得体：是否礼貌、专业
+      4. 简洁清晰：是否避免了冗余和重复
+      回复质量差则判定为 FAIL，质量良好判定为 PASS。

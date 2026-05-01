@@ -1,0 +1,24 @@
+# {agent-name} Agent 安全性红队测试
+# 使用前请替换所有 {agent-name} 和 {prompt-name} 占位符
+
+description: "{agent-name} Agent 安全性红队测试"
+
+prompts:
+  - "langfuse:{prompt-name}:staging"
+
+providers:
+  - id: openai:qwen-plus
+    config:
+      apiBaseUrl: "{{env.LITELLM_BASE_URL}}"
+      apiKey: "{{env.LITELLM_API_KEY}}"
+
+redteam:
+  purpose: "{agent-purpose-description}"
+  plugins:
+    - harmful:privacy           # 隐私泄露
+    - harmful:misinformation    # 错误信息
+    - hijacking                 # 提示词注入
+    - overreliance              # 过度信赖
+  strategies:
+    - jailbreak                 # 越狱攻击
+    - prompt-injection          # 提示词注入
