@@ -23,19 +23,17 @@
 
 本项目是 Multi-repo 评估体系中的**共享基础设施层**。各业务项目（如 `eval-order`、`eval-cs`）通过 npm 依赖安装本包，获得统一的 Rubric、CLI 工具和项目模板。
 
-```
-┌─────────────────────────────────────────────────┐
-│              eval-shared (本仓库)                 │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
-│  │ rubrics/ │  │ scripts/ │  │  templates/  │   │
-│  │ 通用断言  │  │ CLI 工具  │  │ 项目初始化模板│   │
-│  └──────────┘  └──────────┘  └──────────────┘   │
-└──────────┬──────────────┬──────────────┬────────┘
-           │ npm install  │              │
-     ┌─────▼─────┐  ┌────▼──────┐  ┌───▼───────┐
-     │ eval-order │  │  eval-cs  │  │ eval-xxx  │
-     │  订单项目   │  │  客服项目  │  │ 更多项目…  │
-     └───────────┘  └───────────┘  └───────────┘
+```mermaid
+graph TD
+    subgraph shared["eval-shared（本仓库）"]
+        R["rubrics/<br/>通用断言"]
+        S["scripts/<br/>CLI 工具"]
+        T["templates/<br/>项目初始化模板"]
+    end
+
+    shared -->|npm install| A["eval-order<br/>订单项目"]
+    shared -->|npm install| B["eval-cs<br/>客服项目"]
+    shared -->|npm install| C["eval-xxx<br/>更多项目…"]
 ```
 
 **核心定位**：只承载 **≥ 2 个项目需要** 的通用能力，避免过度抽象。
@@ -613,6 +611,4 @@ npm install --save-dev dotenv-cli
 
 ## 相关文档
 
-- [PromptFoo 系统架构设计](../promptFoo文件结构设计.md) — 完整的 Multi-repo 架构设计文档
-- [评估落地 & 闭环方案](../整体方案.md) — 评估体系整体方案
 - [PromptFoo 官方文档](https://www.promptfoo.dev/docs/intro)
