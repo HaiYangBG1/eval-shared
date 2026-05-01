@@ -1,4 +1,4 @@
-# @org/eval-shared
+# @lxj/eval-shared
 
 > PromptFoo 评估共享工具包 — 所有项目仓库的基础设施。
 
@@ -43,7 +43,7 @@ graph TB
 在你的项目仓库中执行：
 
 ```bash
-npm install --save-dev @org/eval-shared
+npm install --save-dev @lxj/eval-shared
 ```
 
 安装完成后：
@@ -57,7 +57,7 @@ npm install --save-dev @org/eval-shared
 ```
 eval-shared/
 │
-├── package.json                        # 包名：@org/eval-shared
+├── package.json                        # 包名：@lxj/eval-shared
 ├── README.md                           # 本文档
 │
 ├── rubrics/                            # 📋 通用 Rubric 模板
@@ -96,15 +96,15 @@ npm init -y
 ### Step 2：安装依赖
 
 ```bash
-npm install --save-dev promptfoo @org/eval-shared
+npm install --save-dev promptfoo @lxj/eval-shared
 ```
 
 ### Step 3：从模板复制基础文件
 
 ```bash
 # 复制环境变量模板和 gitignore
-cp node_modules/@org/eval-shared/templates/.env.example .env.example
-cp node_modules/@org/eval-shared/templates/.gitignore .gitignore
+cp node_modules/@lxj/eval-shared/templates/.env.example .env.example
+cp node_modules/@lxj/eval-shared/templates/.gitignore .gitignore
 
 # 复制 .env.example 为 .env，并填入真实密钥
 cp .env.example .env
@@ -125,10 +125,10 @@ touch output/.gitkeep
 从模板复制并修改：
 
 ```bash
-cp node_modules/@org/eval-shared/templates/promptfooconfig.template.yaml \
+cp node_modules/@lxj/eval-shared/templates/promptfooconfig.template.yaml \
    agents/intent-agent/promptfooconfig.yaml
 
-cp node_modules/@org/eval-shared/templates/redteam.template.yaml \
+cp node_modules/@lxj/eval-shared/templates/redteam.template.yaml \
    agents/intent-agent/redteam.yaml
 ```
 
@@ -222,14 +222,14 @@ Rubric 是可复用的断言（assert）集合，通过 `$ref` 语法在项目�
 # 引用整个 assert 数组
 defaultTest:
   assert:
-    - $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
 
 # 也可以同时引用多个 Rubric
 defaultTest:
   assert:
-    - $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
-    - $ref: node_modules/@org/eval-shared/rubrics/quality.yaml#/assert
-    - $ref: node_modules/@org/eval-shared/rubrics/tone.yaml#/assert
+    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/@lxj/eval-shared/rubrics/quality.yaml#/assert
+    - $ref: node_modules/@lxj/eval-shared/rubrics/tone.yaml#/assert
 ```
 
 ### 可用 Rubric 一览
@@ -246,7 +246,7 @@ defaultTest:
 
 ```yaml
 # 引用方式
-- $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+- $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
 ```
 
 #### `quality.yaml` — 通用回复质量
@@ -254,7 +254,7 @@ defaultTest:
 从四个维度评估回复：意图理解、信息完整、语气得体、简洁清晰。
 
 ```yaml
-- $ref: node_modules/@org/eval-shared/rubrics/quality.yaml#/assert
+- $ref: node_modules/@lxj/eval-shared/rubrics/quality.yaml#/assert
 ```
 
 #### `format-json.yaml` — JSON 格式规范
@@ -262,7 +262,7 @@ defaultTest:
 适用于需要输出 JSON 的 Agent。包含 `is-json` 硬性断言 + LLM 语义检查（字段完整性、类型正确性）。
 
 ```yaml
-- $ref: node_modules/@org/eval-shared/rubrics/format-json.yaml#/assert
+- $ref: node_modules/@lxj/eval-shared/rubrics/format-json.yaml#/assert
 ```
 
 #### `tone.yaml` — 语气 / 专业度
@@ -270,7 +270,7 @@ defaultTest:
 评估回复的语气友好度、用词专业性、角色一致性。适用于面向终端用户的 Agent。
 
 ```yaml
-- $ref: node_modules/@org/eval-shared/rubrics/tone.yaml#/assert
+- $ref: node_modules/@lxj/eval-shared/rubrics/tone.yaml#/assert
 ```
 
 ### 项目特有断言
@@ -282,7 +282,7 @@ defaultTest:
 defaultTest:
   assert:
     # 共享 Rubric
-    - $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+    - $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
     # 项目特有
     - type: contains
       value: "订单号"
@@ -536,13 +536,13 @@ steps:
 
 ```bash
 # 查看当前版本
-npm list @org/eval-shared
+npm list @lxj/eval-shared
 
 # 升级到最新兼容版本
-npm update @org/eval-shared
+npm update @lxj/eval-shared
 
 # 升级到指定版本（破坏性变更时）
-npm install --save-dev @org/eval-shared@^2.0.0
+npm install --save-dev @lxj/eval-shared@^2.0.0
 ```
 
 **原则**：
@@ -560,7 +560,7 @@ npm install --save-dev @org/eval-shared@^2.0.0
 
 ```yaml
 # ✅ 正确
-- $ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+- $ref: node_modules/@lxj/eval-shared/rubrics/safety.yaml#/assert
 
 # ❌ 错误 — 不要用相对路径
 - $ref: ../../eval-shared/rubrics/safety.yaml#/assert

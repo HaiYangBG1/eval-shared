@@ -1,5 +1,5 @@
 {
-  "name": "@org/eval-shared",
+  "name": "@lxj/eval-shared",
   "version": "1.0.0",
   "private": true,
   "description": "PromptFoo 评估共享工具包",
