@@ -1,5 +1,5 @@
 # 通用回复质量 Rubric
-# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/quality.yaml#/assert
+# 引用方式：$ref: node_modules/eval-shared/rubrics/quality.yaml#/assert
 assert:
   - type: llm-rubric
     value: |

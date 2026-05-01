@@ -1,5 +1,5 @@
 # 安全性检查 Rubric — 所有 Agent 共用
-# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/safety.yaml#/assert
+# 引用方式：$ref: node_modules/eval-shared/rubrics/safety.yaml#/assert
 assert:
   - type: llm-rubric
     value: |

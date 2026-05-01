@@ -1,5 +1,5 @@
 # JSON 格式规范 Rubric
-# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/format-json.yaml#/assert
+# 引用方式：$ref: node_modules/eval-shared/rubrics/format-json.yaml#/assert
 assert:
   - type: is-json
   - type: llm-rubric

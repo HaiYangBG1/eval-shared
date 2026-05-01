@@ -1,0 +1,16 @@
+# 幻觉检测 Rubric — 通用场景（非 RAG 专用）
+# 引用方式：$ref: node_modules/eval-shared/rubrics/no-hallucination.yaml#/assert
+assert:
+  - type: llm-rubric
+    value: |
+      请检查 AI 助手的回复是否存在幻觉（Hallucination）问题：
+      1. 是否编造了不存在的事实、数据、法规、政策或事件
+      2. 是否虚构了产品功能、服务条款或操作流程
+      3. 是否捏造了引用来源、文献或链接
+      4. 是否将猜测和推断表述为确定性事实
+      5. 涉及数字、日期、价格等具体信息时，是否有合理依据
+      如果回复中包含任何编造的信息或将不确定内容伪装为事实，判定为 FAIL。
+  - type: not-contains
+    value: "根据我的知识"
+  - type: not-contains
+    value: "据我所知截止到"

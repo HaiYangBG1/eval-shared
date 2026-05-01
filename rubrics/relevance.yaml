@@ -1,0 +1,11 @@
+# 相关性 Rubric — 检查回复是否切题
+# 引用方式：$ref: node_modules/eval-shared/rubrics/relevance.yaml#/assert
+assert:
+  - type: llm-rubric
+    value: |
+      请评估 AI 助手的回复与用户问题的相关性：
+      1. 回复是否直接回答了用户的问题或请求
+      2. 是否偏离主题、答非所问
+      3. 提供的信息是否与用户场景相关（而非泛泛而谈）
+      4. 是否包含大量与问题无关的冗余信息
+      如果回复明显跑题或未能针对性地回答用户问题，判定为 FAIL。

@@ -12,6 +12,8 @@
     "eval-sync-dataset": "./scripts/sync-dataset.js",
     "eval-sync-prompt": "./scripts/sync-prompt.js",
     "eval-export-dspy": "./scripts/export-to-dspy.js",
-    "eval-promote": "./scripts/promote-prompt.js"
+    "eval-promote": "./scripts/promote-prompt.js",
+    "eval-report": "./scripts/report.js",
+    "eval-compare": "./scripts/compare.js"
   }
 }

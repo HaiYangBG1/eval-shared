@@ -1,5 +1,5 @@
 # 语气 / 专业度 Rubric
-# 引用方式：$ref: node_modules/@org/eval-shared/rubrics/tone.yaml#/assert
+# 引用方式：$ref: node_modules/eval-shared/rubrics/tone.yaml#/assert
 assert:
   - type: llm-rubric
     value: |
