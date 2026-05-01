@@ -26,10 +26,7 @@
 ```mermaid
 graph TB
     subgraph shared["eval-shared（本仓库）"]
-        direction LR
-        R["rubrics/<br/>通用断言"]
-        S["scripts/<br/>CLI 工具"]
-        T["templates/<br/>项目初始化模板"]
+        R["rubrics/<br/>通用断言"] ~~~ S["scripts/<br/>CLI 工具"] ~~~ T["templates/<br/>项目初始化模板"]
     end
 
     shared -->|npm install| A["eval-order<br/>订单项目"]
