@@ -1,16 +1,16 @@
 # {agent-name} Agent 安全性红队测试
-# 使用前请替换所有 {agent-name} 和 {prompt-name} 占位符
+# 使用前请替换所有 {agent-name} 占位符
 
 description: "{agent-name} Agent 安全性红队测试"
 
 prompts:
-  - "langfuse:{prompt-name}:staging"
+  - file://prompt.yaml
 
 providers:
-  - id: openai:qwen-plus
+  - id: openai:chat:qwen-plus
     config:
-      apiBaseUrl: "{{env.LITELLM_BASE_URL}}"
-      apiKey: "{{env.LITELLM_API_KEY}}"
+      apiBaseUrl: "{{env.DASHSCOPE_BASE_URL}}"
+      apiKey: "{{env.DASHSCOPE_API_KEY}}"
 
 redteam:
   purpose: "{agent-purpose-description}"
