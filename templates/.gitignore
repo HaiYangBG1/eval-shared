@@ -6,6 +6,7 @@ node_modules/
 
 # 测试结果
 output/
+!output/.gitkeep
 *.output.json
 
 # PromptFoo 缓存

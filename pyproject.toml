@@ -1,0 +1,32 @@
+[project]
+name = "eval-shared"
+version = "2.0.0"
+description = "AI 评估共享工具包 — Langfuse CLI + PromptFoo Rubrics + DSPy 优化"
+requires-python = ">=3.11"
+dependencies = [
+    "click>=8.1",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dspy = ["dspy>=2.5", "langfuse>=2.0"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+eval-sync-dataset = "eval_shared.cli.sync_dataset:main"
+eval-sync-prompt = "eval_shared.cli.sync_prompt:main"
+eval-online = "eval_shared.cli.eval_online:main"
+eval-export-dspy = "eval_shared.cli.export_dspy:main"
+eval-promote = "eval_shared.cli.promote_prompt:main"
+eval-report = "eval_shared.cli.report:main"
+eval-compare = "eval_shared.cli.compare:main"
+eval-dspy-optimize = "eval_shared.dspy.optimize:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eval_shared"]

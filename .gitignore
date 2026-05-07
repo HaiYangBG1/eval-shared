@@ -1,8 +1,19 @@
-node_modules/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+dist/
+*.egg-info/
+.eggs/
+
+# 密钥
 .env
 .env.local
-*.log
+
+# 其他
 .DS_Store
-dist/
-coverage/
 .promptfoo/
+*.log
+coverage/
+.pytest_cache/
