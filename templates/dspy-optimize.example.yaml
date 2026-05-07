@@ -1,0 +1,56 @@
+# ============================================
+# DSPy 优化配置文件 — 示例
+# ============================================
+#
+# 用法：
+#   eval-dspy-optimize --config dspy-optimize.yaml
+#   eval-dspy-optimize --config dspy-optimize.yaml --dry-run  # 仅验证
+#
+# 前置条件：
+#   pip install eval-shared[dspy]
+#   配置 .env 中的 DSPY_LM_* 和 LANGFUSE_* 变量
+
+# ═══ 数据来源 ═══
+dataset: intention              # Langfuse Dataset 名称
+source: langfuse                # langfuse 或 json
+# json_path: output/intention_dspy.json  # source=json 时使用
+
+# ═══ 任务定义 ═══
+task:
+  description: "根据用户的消息，判断其意图类别。"
+  input_fields:
+    - name: query
+      desc: "用户发送的消息内容"
+  output_fields:
+    - name: answer
+      desc: "意图类别"
+  module: predict               # predict 或 chain_of_thought
+
+# ═══ 评估指标 ═══
+metric:
+  type: exact_match             # exact_match | contains | llm_judge
+  # ── llm_judge 专用选项 ──
+  # rubric: |
+  #   评估 AI 的意图分类是否正确。
+  #   满分标准：意图类别完全匹配。
+  #   扣分标准：意图类别不匹配则 0 分。
+  # threshold: 0.7              # 通过阈值（0-1）
+
+# ═══ 优化器设置 ═══
+optimizer:
+  type: miprov2                 # miprov2 | bootstrap_fewshot | bootstrap_random
+  auto: light                   # light | medium | heavy （仅 miprov2）
+  max_bootstrapped_demos: 3     # 最大自动生成的 Few-shot 示例数
+  max_labeled_demos: 3          # 最大使用标注的 Few-shot 示例数
+  num_trials: 10                # 贝叶斯搜索试验次数（仅 miprov2）
+
+# ═══ 数据集分割 ═══
+split:
+  train_ratio: 0.7              # 训练集比例
+
+# ═══ 输出配置 ═══
+output:
+  save_path: ""                 # 留空则自动生成带时间戳的路径
+  upload_langfuse: true         # 是否上传到 Langfuse
+  prompt_name: intention-prompt # Langfuse Prompt 名称
+  label: staging                # Langfuse 标签

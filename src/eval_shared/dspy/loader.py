@@ -4,6 +4,8 @@
 支持两种数据来源：
   1. 直接从 Langfuse Dataset API 加载
   2. 从 eval-export-dspy 导出的 JSON 文件加载
+
+支持单字段和多字段任务配置。
 """
 
 from __future__ import annotations
@@ -96,6 +98,45 @@ def load_from_langfuse(
         ex = dspy.Example(
             **{input_field: input_val, output_field: output_val}
         ).with_inputs(input_field)
+        examples.append(ex)
+
+    return examples
+
+
+def load_from_json_multi(
+    path: str | Path,
+    input_fields: list[str],
+    output_fields: list[str],
+) -> list[Any]:
+    """
+    从 JSON 文件加载为多字段 dspy.Example 列表。
+
+    适用于任务有多个输入/输出字段的情况。
+
+    Args:
+        path: JSON 文件路径
+        input_fields: 输入字段名列表
+        output_fields: 输出字段名列表
+
+    Returns:
+        list[dspy.Example]
+    """
+    try:
+        import dspy
+    except ImportError:
+        raise ImportError(
+            "dspy 未安装，请运行: pip install eval-shared[dspy]"
+        )
+
+    data = json.loads(Path(path).read_text("utf-8"))
+    examples = []
+    for item in data:
+        fields = {}
+        for f in input_fields:
+            fields[f] = item.get(f, "")
+        for f in output_fields:
+            fields[f] = item.get(f, "")
+        ex = dspy.Example(**fields).with_inputs(*input_fields)
         examples.append(ex)
 
     return examples

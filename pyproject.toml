@@ -11,7 +11,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dspy = ["dspy>=2.5", "langfuse>=2.0"]
+dspy = ["dspy>=2.5", "langfuse>=2.0", "optuna>=3.0"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

@@ -113,3 +113,51 @@ def get_eval_model_config() -> dict:
         "api_key": api_key,
         "model_name": model_name,
     }
+
+
+def get_dspy_lm_config() -> dict:
+    """
+    返回 DSPy LM 配置。
+
+    读取顺序：
+      DSPY_LM_MODEL    → 必须（如 openai/qwen-plus）
+      DSPY_LM_API_BASE → 回退到 EVAL_MODEL_BASE_URL → DASHSCOPE_BASE_URL
+      DSPY_LM_API_KEY  → 回退到 EVAL_MODEL_API_KEY  → DASHSCOPE_API_KEY
+
+    Returns:
+        {
+            "model": str,        # DSPy model identifier (e.g. "openai/qwen-plus")
+            "api_base": str,
+            "api_key": str,
+        }
+    """
+    model = os.environ.get("DSPY_LM_MODEL", "")
+    if not model:
+        print("❌ 缺少环境变量：DSPY_LM_MODEL（如 openai/qwen-plus）", file=sys.stderr)
+        sys.exit(1)
+
+    api_base = (
+        os.environ.get("DSPY_LM_API_BASE")
+        or os.environ.get("EVAL_MODEL_BASE_URL")
+        or os.environ.get("DASHSCOPE_BASE_URL")
+        or ""
+    )
+    api_key = (
+        os.environ.get("DSPY_LM_API_KEY")
+        or os.environ.get("EVAL_MODEL_API_KEY")
+        or os.environ.get("DASHSCOPE_API_KEY")
+        or ""
+    )
+
+    if not api_base or not api_key:
+        print(
+            "❌ 缺少 DSPy LM 配置：DSPY_LM_API_BASE / DSPY_LM_API_KEY",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    return {
+        "model": model,
+        "api_base": api_base.rstrip("/"),
+        "api_key": api_key,
+    }
