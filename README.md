@@ -105,6 +105,8 @@ eval-shared/
 │   │
 │   └── dspy/                              # 🧠 DSPy 优化模块
 │       ├── loader.py                      #   从 Langfuse/JSON 加载 Example
+│       ├── module_factory.py              #   动态创建 Signature/Module（支持 description_file）
+│       ├── metrics.py                     #   评估指标（exact_match / llm_judge + rubric_file）
 │       ├── uploader.py                    #   优化结果上传 Langfuse
 │       └── optimize.py                    #   优化器 CLI 入口
 │
@@ -307,20 +309,50 @@ eval-compare --baseline output/v1.json --candidate output/v2.json
 ### CLI 入口
 
 ```bash
-eval-dspy-optimize --config dspy-optimize.yaml --dry-run
+# 验证配置和数据
+eval-dspy-optimize --config agents/intention/dspy-optimize.yaml --dry-run
+
+# 正式运行（基线评估 → MIPROv2 优化 → 优化后评估 → 上传 Langfuse）
+eval-dspy-optimize --config agents/intention/dspy-optimize.yaml
 ```
 
-### 配置文件示例
+### 配置文件格式（Single Source 架构）
 
 ```yaml
 # dspy-optimize.yaml
-dataset: intention                # Langfuse Dataset 名称
-input_field: query                # 输入字段名
-output_field: answer              # 输出字段名
-prompt_name: intention-prompt     # 优化后上传的 Prompt 名称
-source: langfuse                  # 数据来源：langfuse 或 json
-# json_path: output/xxx.json     # source=json 时的文件路径
+dataset: intention                    # Langfuse Dataset 名称
+source: langfuse
+
+task:
+  description_file: agents/intention/prompt.yaml   # 🔑 从生产 Prompt 读取任务描述
+  # description: "备选：内联描述（不推荐，会与 prompt.yaml 重复）"
+  input_fields:
+    - name: query
+      desc: "用户输入"
+  output_fields:
+    - name: intent
+      desc: "意图类别"
+  module: predict                     # predict 或 chain_of_thought
+
+metric:
+  type: exact_match                   # exact_match 或 llm_judge
+  # rubric_file: docs/eval-specs/recommend.md  # llm_judge 时：从 eval-spec 读取评分规则
+
+optimizer:
+  type: miprov2
+  auto: light                         # light / medium / heavy
+  max_bootstrapped_demos: 3
+  max_labeled_demos: 3
+
+output:
+  upload_langfuse: true
+  prompt_name: intention-prompt
+  label: staging
 ```
+
+> **Single Source 关键设计**：
+> - `description_file` → 读取 `prompt.yaml` 的 system message 作为 DSPy 种子指令，不再手写 description
+> - `rubric_file` → 读取 `docs/eval-specs/*.md` 作为 LLM Judge 评分规则，与 eval-online 共享同一标准
 
 ### Python API
 
@@ -328,17 +360,12 @@ source: langfuse                  # 数据来源：langfuse 或 json
 from eval_shared.dspy.loader import load_from_langfuse, load_from_json
 from eval_shared.dspy.uploader import upload_optimized_prompt
 
-# 加载数据
-examples = load_from_langfuse("intention", input_field="query", output_field="answer")
-
-# 你的 DSPy 优化逻辑...
-# optimized_prompt = ...
+# 加载数据（自动从 expectedOutput dict 中提取 output_field）
+examples = load_from_langfuse("intention", input_field="query", output_field="intent")
 
 # 上传结果
 upload_optimized_prompt("intention-prompt", optimized_messages, label="staging")
 ```
-
-> ⚠️ MIPROv2 优化闭环正在开发中，当前 CLI 仅支持数据加载验证。
 
 ---
 
@@ -400,10 +427,12 @@ eval-promote --agent intent-agent
 ### 场景二：DSPy 自动优化
 
 ```bash
-# 1. 导出数据
-eval-export-dspy --agent intent-agent
-# 2. 运行优化（MIPROv2 开发中）
-eval-dspy-optimize --config configs/intent.yaml --dry-run
+# 1. 验证数据和配置
+eval-dspy-optimize --config agents/intention/dspy-optimize.yaml --dry-run
+# 2. 运行 MIPROv2 优化
+eval-dspy-optimize --config agents/intention/dspy-optimize.yaml
+# 3. 优化后 Prompt 自动上传 Langfuse (staging)，人工确认后 promote
+eval-promote --agent intention
 ```
 
 ### 缓存策略
