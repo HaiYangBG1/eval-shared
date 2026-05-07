@@ -211,7 +211,11 @@ def main(config_path: str, dry_run: bool, seed: int):
     module = create_module(signature, module_type)
 
     input_names, output_names = get_field_names(task_config)
-    click.echo(f"  任务描述  : {task_config.get('description', '?')}")
+    desc_file = task_config.get("description_file")
+    if desc_file:
+        click.echo(f"  任务描述  : (from {desc_file}, {len(signature.__doc__)} chars)")
+    else:
+        click.echo(f"  任务描述  : {task_config.get('description', '?')}")
     click.echo(f"  输入字段  : {input_names}")
     click.echo(f"  输出字段  : {output_names}")
     click.echo(f"  模块类型  : {module_type}")

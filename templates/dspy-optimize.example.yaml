@@ -17,7 +17,8 @@ source: langfuse                # langfuse 或 json
 
 # ═══ 任务定义 ═══
 task:
-  description: "根据用户的消息，判断其意图类别。"
+  description_file: agents/intention/prompt.yaml  # 推荐：读取生产 Prompt（Single Source）
+  # description: "备选：内联任务描述（不推荐，会与 prompt.yaml 重复）"
   input_fields:
     - name: query
       desc: "用户发送的消息内容"
