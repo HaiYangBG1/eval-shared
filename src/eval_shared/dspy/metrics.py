@@ -16,25 +16,30 @@ from typing import Any, Callable
 
 def _extract_rubric_from_file(
     rubric_file: str,
-    section_name: str = "打分规则",
+    section_name: str | None = None,
 ) -> str:
     """
-    从 eval-spec 文件中提取打分规则章节。
+    从 eval-spec 文件读取评分规则。
 
-    与 eval-online 使用相同的提取逻辑，确保 Single Source of Truth。
+    默认读取全文（包含功能定义、质量维度、打分规则等完整上下文），
+    只有显式指定 section_name 时才截取特定章节。
 
     Args:
         rubric_file: eval-spec 文件路径（如 docs/eval-specs/recommend.md）
-        section_name: 章节名称（默认"打分规则"）
+        section_name: 可选，截取指定章节（如"打分规则"）；不指定则返回全文
 
     Returns:
-        提取出的打分规则文本
+        eval-spec 内容
     """
     path = Path(rubric_file)
     if not path.exists():
         raise FileNotFoundError(f"rubric_file 不存在: {rubric_file}")
 
     full_content = path.read_text("utf-8")
+
+    if not section_name:
+        return full_content
+
     pattern = rf"^##\s+\d+\.\s*{re.escape(section_name)}"
     m = re.search(pattern, full_content, re.MULTILINE)
     if m:
@@ -186,7 +191,8 @@ def build_metric(metric_config: dict, output_fields: list[str]) -> Callable:
         # 优先使用 rubric_file（Single Source），回退到内联 rubric
         rubric_file = metric_config.get("rubric_file")
         if rubric_file:
-            section = metric_config.get("rubric_section", "打分规则")
+            # 默认读全文；显式指定 rubric_section 时才截取章节
+            section = metric_config.get("rubric_section")  # None = 全文
             rubric = _extract_rubric_from_file(rubric_file, section)
         else:
             rubric = metric_config.get("rubric", "评估预测输出与参考答案的语义一致性。")
