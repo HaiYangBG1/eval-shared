@@ -30,11 +30,11 @@ task:
 metric:
   type: exact_match             # exact_match | contains | llm_judge
   # ── llm_judge 专用选项 ──
-  # rubric: |
-  #   评估 AI 的意图分类是否正确。
-  #   满分标准：意图类别完全匹配。
-  #   扣分标准：意图类别不匹配则 0 分。
-  # threshold: 0.7              # 通过阈值（0-1）
+  # rubric_file: docs/eval-specs/recommend.md  # 推荐：引用 eval-spec 文件（Single Source）
+  # rubric_section: "打分规则"                  # 默认提取"打分规则"章节
+  # rubric: |                                   # 备选：内联 rubric（不推荐，会重复）
+  #   评估标准...
+
 
 # ═══ 优化器设置 ═══
 optimizer:
