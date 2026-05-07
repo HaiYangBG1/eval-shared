@@ -77,7 +77,7 @@ def load_from_langfuse(
 
     init_env()
     with LangfuseClient() as client:
-        items = client.get_dataset_items(dataset_name, limit=200)
+        items = client.get_dataset_items(dataset_name, limit=100)
 
     examples = []
     for item in items:
@@ -89,11 +89,18 @@ def load_from_langfuse(
             or input_data.get("question")
             or json.dumps(input_data, ensure_ascii=False)
         )
-        output_val = (
-            expected if isinstance(expected, str)
-            else json.dumps(expected, ensure_ascii=False) if expected
-            else ""
-        )
+        # 从 expectedOutput 提取输出值
+        # 1. 如果 expected 是 dict 且含 output_field key，直接取该字段
+        # 2. 否则按原逻辑（字符串直接用 / dict 序列化为 JSON）
+        if isinstance(expected, dict) and output_field in expected:
+            raw = expected[output_field]
+            output_val = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+        elif isinstance(expected, str):
+            output_val = expected
+        elif expected:
+            output_val = json.dumps(expected, ensure_ascii=False)
+        else:
+            output_val = ""
 
         ex = dspy.Example(
             **{input_field: input_val, output_field: output_val}

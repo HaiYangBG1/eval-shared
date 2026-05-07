@@ -88,9 +88,15 @@ def _run_evaluation(module, dev_data: list, metric, label: str = "") -> float:
         metric=metric,
         num_threads=1,
         display_progress=True,
-        display_table=5,  # 显示前 5 条结果
+        display_table=0,
     )
-    score = evaluator(module)
+    result = evaluator(module)
+    # DSPy 新版返回 EvaluationResult 对象，旧版返回 float
+    if isinstance(result, (int, float)):
+        score = float(result) / 100.0  # DSPy 返回百分比
+    else:
+        # EvaluationResult 对象，取其数值
+        score = float(result) / 100.0 if float(result) > 1 else float(result)
     if label:
         click.echo(f"\n  {label}: {score:.2%}")
     return score
@@ -137,7 +143,11 @@ def _run_optimizer(config: dict, module, trainset: list, metric):
             max_bootstrapped_demos=max_bootstrapped,
             max_labeled_demos=max_labeled,
         )
-        return optimizer.compile(module, trainset=trainset, num_trials=num_trials)
+        # auto 模式下 DSPy 自行决定 num_trials，不能同时传
+        if auto:
+            return optimizer.compile(module, trainset=trainset)
+        else:
+            return optimizer.compile(module, trainset=trainset, num_trials=num_trials)
 
 
 @click.command()
