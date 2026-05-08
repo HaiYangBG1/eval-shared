@@ -101,7 +101,9 @@ eval-shared/
 │   │   ├── export_dspy.py                 #   Dataset → dspy.Example 格式
 │   │   ├── promote_prompt.py              #   Prompt staging → production
 │   │   ├── compare.py                     #   多次评估结果对比
-│   │   └── report.py                      #   评估报告汇总
+│   │   ├── report.py                      #   评估报告汇总
+│   │   ├── promptfoo_ab.py                #   PromptFoo A/B 对比（production vs staging）
+│   │   └── dspy_pipeline.py               #   DSPy 优化 + A/B 对比 + 标注 完整流水线
 │   │
 │   └── dspy/                              # 🧠 DSPy 优化模块
 │       ├── loader.py                      #   从 Langfuse/JSON 加载 Example
@@ -195,7 +197,10 @@ cp $SHARED/../../templates/redteam.template.yaml agents/intent-agent/redteam.yam
     "sync:prompt": "eval-sync-prompt",
     "export:dspy": "eval-export-dspy",
     "promote": "eval-promote",
-    "cache:clear": "promptfoo cache clear"
+    "cache:clear": "promptfoo cache clear",
+    "dspy:optimize": "eval-dspy-pipeline --config",
+    "dspy:optimize:skip": "eval-dspy-pipeline --skip-optimize --config",
+    "promptfoo:ab": "eval-promptfoo-ab"
   }
 }
 ```
@@ -299,6 +304,45 @@ eval-report --input output/latest.json --agent intent-agent
 ```bash
 eval-compare --baseline output/v1.json --candidate output/v2.json
 ```
+
+### `eval-promptfoo-ab` — PromptFoo A/B 对比
+
+自动拉取 production 和 staging 的 Prompt，分别跑 PromptFoo 评估，生成对比报告（回归/改善明细）。
+
+```bash
+# 默认对比 production vs staging
+eval-promptfoo-ab --agent intention
+
+# 自定义标签
+eval-promptfoo-ab --agent intention --baseline-label production --candidate-label staging
+```
+
+输出文件：
+- `output/{agent}-ab-report.md` — Markdown 对比报告
+- `output/{agent}-ab-summary.json` — 机器可读摘要（供流水线读取）
+
+### `eval-dspy-pipeline` — 完整流水线
+
+串联四个阶段：DSPy 优化 → PromptFoo A/B 对比 → 决策报告 → Langfuse Prompt 标注。
+
+```bash
+# 完整流程：DSPy 优化 + A/B 对比 + 报告 + 标注
+eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml
+
+# 跳过 DSPy 优化，直接 A/B 对比（适用于已优化的情况）
+eval-dspy-pipeline --skip-optimize --config agents/intention/dspy-optimize.yaml
+
+# 验证配置（dry-run）
+eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml --dry-run
+```
+
+流程说明：
+1. **Phase 1**: DSPy MIPROv2 优化，结果上传 Langfuse staging
+2. **Phase 2**: PromptFoo A/B 对比（production vs staging）
+3. **Phase 3**: 生成统一决策报告（`output/{agent}-pipeline-report.md`）
+4. **Phase 4**: 自动标注 Langfuse Prompt（如 `A/B ✅ 67.7%→80.6%` 或 `A/B ❌ 67.7%→16.1% 回归17`）
+
+> **短路机制**：DSPy 优化无提升时自动跳过 Phase 2-4，节省 API 成本。
 
 ---
 
@@ -445,15 +489,32 @@ AGENT=intent-agent npm run test:agent
 eval-promote --agent intent-agent
 ```
 
-### 场景二：DSPy 自动优化
+### 场景二：DSPy 自动优化 + A/B 验证
 
 ```bash
 # 1. 验证数据和配置
-eval-dspy-optimize --config agents/intention/dspy-optimize.yaml --dry-run
-# 2. 运行 MIPROv2 优化
-eval-dspy-optimize --config agents/intention/dspy-optimize.yaml
-# 3. 优化后 Prompt 自动上传 Langfuse (staging)，人工确认后 promote
+eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml --dry-run
+
+# 2. 完整流水线：DSPy 优化 → PromptFoo A/B 对比 → 报告 → Langfuse 标注
+eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml
+# 或用 npm script：
+npm run dspy:optimize -- agents/intention/dspy-optimize.yaml
+
+# 3. 查看报告“是否安全升级”
+cat output/intention-pipeline-report.md
+
+# 4. Langfuse 上已自动标注，确认后 promote
 eval-promote --agent intention
+```
+
+### 场景三：仅跑 A/B 对比（已有 staging prompt）
+
+```bash
+# 跳过 DSPy 优化，直接对比
+npm run dspy:optimize:skip -- agents/intention/dspy-optimize.yaml
+
+# 或独立使用 A/B 工具
+eval-promptfoo-ab --agent intention
 ```
 
 ### 缓存策略
