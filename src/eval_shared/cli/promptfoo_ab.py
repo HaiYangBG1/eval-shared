@@ -319,6 +319,21 @@ def main(agent: str, baseline_label: str, candidate_label: str, output_dir: str,
     Path(report_path).parent.mkdir(parents=True, exist_ok=True)
     Path(report_path).write_text(report, encoding="utf-8")
 
+    # 同时输出机器可读的 JSON 摘要（供 pipeline 编排层读取）
+    summary = {
+        "agent": agent,
+        "baseline_label": baseline_label,
+        "candidate_label": candidate_label,
+        "baseline": base_stats,
+        "candidate": cand_stats,
+        "regressions": len(regressions),
+        "improvements": len(improvements),
+        "rate_diff": float(cand_stats["rate"]) - float(base_stats["rate"]),
+        "safe_to_upgrade": not regressions and float(cand_stats["rate"]) >= float(base_stats["rate"]),
+    }
+    summary_path = f"{output_dir}/{agent}-ab-summary.json"
+    Path(summary_path).write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
     # 终端摘要
     rate_diff = float(cand_stats["rate"]) - float(base_stats["rate"])
     rate_emoji = "📈" if rate_diff > 0 else ("📉" if rate_diff < 0 else "➡️")

@@ -103,6 +103,19 @@ class LangfuseClient:
         r.raise_for_status()
         return r.json()
 
+    def update_prompt_labels(self, name: str, version: int, labels: list[str]) -> dict:
+        """更新指定 prompt 版本的 labels。
+
+        使用 PATCH /api/public/v2/prompts/{name}/versions/{version}
+        Labels 在所有版本中唯一（同一 label 只能属于一个版本）。
+        """
+        r = self._client.patch(
+            f"{self.base_url}/api/public/v2/prompts/{name}/versions/{version}",
+            json={"newLabels": labels},
+        )
+        r.raise_for_status()
+        return r.json()
+
     # ── Observations ──
 
     def get_observations(

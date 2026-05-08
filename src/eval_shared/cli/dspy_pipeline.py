@@ -21,6 +21,7 @@ from pathlib import Path
 import click
 
 from eval_shared.common.config import init_env
+from eval_shared.common.langfuse_client import LangfuseClient
 from eval_shared.common.yaml_utils import load_yaml
 
 
@@ -58,6 +59,54 @@ def _extract_agent_from_config(config: dict) -> str:
     if prompt_name.endswith("-prompt"):
         return prompt_name[:-7]
     return ""
+
+
+def _annotate_prompt(
+    prompt_name: str,
+    ab_summary: dict,
+    dspy_report: dict | None = None,
+) -> None:
+    """将评估结果写回 Langfuse Prompt 的 labels。
+
+    在 staging prompt 版本上添加 A/B 对比结果标签，如：
+      - ab:pass:67.7→80.6(+12.9)
+      - ab:fail:67.7→16.1(-51.6):17reg
+    """
+    baseline_rate = ab_summary.get("baseline", {}).get("rate", "?")
+    candidate_rate = ab_summary.get("candidate", {}).get("rate", "?")
+    rate_diff = ab_summary.get("rate_diff", 0)
+    regressions = ab_summary.get("regressions", 0)
+    safe = ab_summary.get("safe_to_upgrade", False)
+
+    # 构造结果标签
+    verdict = "pass" if safe else "fail"
+    label_text = f"ab-{verdict}-{baseline_rate}-to-{candidate_rate}"
+    if regressions:
+        label_text += f"-{regressions}reg"
+
+    try:
+        with LangfuseClient() as client:
+            # 获取当前 staging 版本号
+            staging = client.get_prompt(prompt_name, label="staging")
+            version = staging.get("version")
+            if not version:
+                click.echo(f"  ⚠️ 无法获取 {prompt_name} staging 版本号，跳过标注")
+                return
+
+            # 保留已有 labels（排除 'latest'——由 Langfuse 系统管理），追加评估结果
+            existing_labels = staging.get("labels", [])
+            # 移除旧的 ab- 标签和系统标签
+            new_labels = [
+                lb for lb in existing_labels
+                if not lb.startswith("ab-") and lb != "latest"
+            ]
+            new_labels.append(label_text)
+
+            client.update_prompt_labels(prompt_name, version, new_labels)
+            click.echo(f"  ✅ 已标注 Langfuse: {prompt_name} v{version} ← {label_text}")
+
+    except Exception as e:
+        click.echo(f"  ⚠️ Langfuse 标注失败（不影响流程）: {e}")
 
 
 def _generate_pipeline_report(
@@ -294,6 +343,21 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
     Path(pipeline_report_path).write_text(report, encoding="utf-8")
 
     click.echo(f"\n📊 统一决策报告 → {pipeline_report_path}")
+
+    # ═══ Phase 4: 标注 Langfuse Prompt ═══
+    click.echo("")
+    click.echo("=" * 56)
+    click.echo("  Phase 4: 标注 Langfuse Prompt")
+    click.echo("=" * 56)
+
+    prompt_name = config.get("output", {}).get("prompt_name", f"{agent}-prompt")
+    ab_summary_path = f"output/{agent}-ab-summary.json"
+
+    if Path(ab_summary_path).exists():
+        ab_summary = json.loads(Path(ab_summary_path).read_text("utf-8"))
+        _annotate_prompt(prompt_name, ab_summary, dspy_report)
+    else:
+        click.echo("  ⚠️ 未找到 A/B 摘要文件，跳过标注")
 
     # 终端最终建议
     if Path(ab_report_path).exists():
