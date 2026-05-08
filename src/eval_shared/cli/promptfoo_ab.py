@@ -26,18 +26,25 @@ from eval_shared.common.config import init_env
 # ── 工具函数 ──
 
 
-def _run_cmd(cmd: list[str], label: str) -> subprocess.CompletedProcess:
+def _run_cmd(cmd: list[str], label: str, capture: bool = True) -> subprocess.CompletedProcess:
     """运行外部命令，失败时抛出异常。"""
     click.echo(f"  🔄 {label}")
     click.echo(f"     $ {' '.join(cmd)}")
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    if capture:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+    else:
+        # 实时输出模式（用于长时间运行的命令如 PromptFoo）
+        result = subprocess.run(cmd)
     if result.returncode != 0:
-        stderr = result.stderr.strip() if result.stderr else ""
-        stdout = result.stdout.strip() if result.stdout else ""
-        error_msg = (stderr or stdout)[-500:]
-        click.echo(f"  ❌ {label} 失败:")
-        if error_msg:
-            click.echo(f"     {error_msg}")
+        if capture:
+            stderr = result.stderr.strip() if result.stderr else ""
+            stdout = result.stdout.strip() if result.stdout else ""
+            error_msg = (stderr or stdout)[-500:]
+            click.echo(f"  ❌ {label} 失败:")
+            if error_msg:
+                click.echo(f"     {error_msg}")
+        else:
+            click.echo(f"  ⚠️ {label} 退出码: {result.returncode}")
         raise click.ClickException(f"{label} 返回非零退出码: {result.returncode}")
     click.echo(f"  ✅ {label} 完成")
     return result
@@ -52,12 +59,27 @@ def _sync_prompt(agent: str, label: str) -> None:
 
 
 def _run_promptfoo(agent: str, output_path: str) -> None:
-    """运行 PromptFoo 评估。"""
+    """运行 PromptFoo 评估。
+
+    使用实时输出模式，且容忍 telemetry 超时导致的非零退出码
+    （PromptFoo 的 telemetry.shutdown() 在子进程中可能超时返回 exit code 100，
+    但评估结果已正确写入文件）。
+    """
     config_path = f"agents/{agent}/promptfooconfig.yaml"
-    _run_cmd(
-        ["npx", "promptfoo", "eval", "-c", config_path, "-o", output_path, "--no-cache"],
-        f"PromptFoo 评估 → {output_path}",
-    )
+    cmd = ["npx", "promptfoo", "eval", "-c", config_path, "-o", output_path, "--no-cache"]
+    click.echo(f"  🔄 PromptFoo 评估 → {output_path}")
+    click.echo(f"     $ {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+
+    # 判断成功：优先检查结果文件是否已生成
+    output_exists = Path(output_path).exists()
+    if result.returncode != 0 and not output_exists:
+        raise click.ClickException(
+            f"PromptFoo 评估失败 (exit code {result.returncode})，且未生成结果文件"
+        )
+    if result.returncode != 0 and output_exists:
+        click.echo(f"  ⚠️ PromptFoo 退出码 {result.returncode}（结果文件已生成，忽略 telemetry 超时）")
+    click.echo(f"  ✅ PromptFoo 评估完成")
 
 
 # ── 结果分析 ──
