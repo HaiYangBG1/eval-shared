@@ -22,7 +22,9 @@ eval-export-dspy = "eval_shared.cli.export_dspy:main"
 eval-promote = "eval_shared.cli.promote_prompt:main"
 eval-report = "eval_shared.cli.report:main"
 eval-compare = "eval_shared.cli.compare:main"
+eval-promptfoo-ab = "eval_shared.cli.promptfoo_ab:main"
 eval-dspy-optimize = "eval_shared.dspy.optimize:main"
+eval-dspy-pipeline = "eval_shared.cli.dspy_pipeline:main"
 
 [build-system]
 requires = ["hatchling"]

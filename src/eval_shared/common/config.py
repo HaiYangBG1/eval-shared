@@ -1,7 +1,13 @@
 """
 环境变量加载与校验。
 
-逻辑与原 JS 版完全对等：
+模型分层策略（能力梯度递增）：
+  - 被测模型 (DASHSCOPE_*) — 成本优先
+  - 评分模型 (OPENAI_* / PROMPTFOO_*) — 判断力优先
+  - 线上评估模型 (EVAL_MODEL_*) — 回退到 DASHSCOPE_*
+  - DSPy 优化器 (DSPY_LM_*) — 质量优先，须 ≥ 评分模型
+
+其他逻辑：
   - LANGFUSE_HOST 优先于 LANGFUSE_BASE_URL
   - EVAL_MODEL_* 未设时回退到 DASHSCOPE_*
 """
@@ -119,21 +125,24 @@ def get_dspy_lm_config() -> dict:
     """
     返回 DSPy LM 配置。
 
+    DSPy 优化器作为「教师」角色，应使用比被测模型更强的模型。
+    三个变量均独立配置，支持回退以便快速启动。
+
     读取顺序：
-      DSPY_LM_MODEL    → 必须（如 openai/qwen-plus）
+      DSPY_LM_MODEL    → 必须（如 openai/<model-name>）
       DSPY_LM_API_BASE → 回退到 EVAL_MODEL_BASE_URL → DASHSCOPE_BASE_URL
       DSPY_LM_API_KEY  → 回退到 EVAL_MODEL_API_KEY  → DASHSCOPE_API_KEY
 
     Returns:
         {
-            "model": str,        # DSPy model identifier (e.g. "openai/qwen-plus")
+            "model": str,        # DSPy model identifier
             "api_base": str,
             "api_key": str,
         }
     """
     model = os.environ.get("DSPY_LM_MODEL", "")
     if not model:
-        print("❌ 缺少环境变量：DSPY_LM_MODEL（如 openai/qwen-plus）", file=sys.stderr)
+        print("❌ 缺少环境变量：DSPY_LM_MODEL（如 openai/<model-name>）", file=sys.stderr)
         sys.exit(1)
 
     api_base = (

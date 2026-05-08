@@ -23,14 +23,14 @@ providers:
       temperature: 0
 
 # ── 全局默认断言 & 评分模型 ──
-# 评分模型必须显式配置，否则 PromptFoo 会默认使用 GPT 模型导致 404
+# 评分模型由 .env 的 PROMPTFOO_GRADING_MODEL 控制（须强于被测模型）
 defaultTest:
   options:
     provider:
-      id: openai:chat:qwen-plus
+      id: "{{env.PROMPTFOO_GRADING_MODEL}}"
       config:
-        apiBaseUrl: "{{env.DASHSCOPE_BASE_URL}}"
-        apiKey: "{{env.DASHSCOPE_API_KEY}}"
+        apiBaseUrl: "{{env.OPENAI_BASE_URL}}"
+        apiKey: "{{env.OPENAI_API_KEY}}"
   assert:
     # 单次调用延迟阈值（根据 Agent 复杂度调整，分类任务建议 5s，生成任务建议 10-15s）
     # DashScope 延迟波动大时建议加 weight: 0 只监控不阻断

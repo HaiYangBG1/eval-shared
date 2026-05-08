@@ -7,7 +7,7 @@ prompts:
   - file://prompt.yaml
 
 providers:
-  - id: openai:chat:qwen-plus
+  - id: openai:chat:{model-name}
     config:
       apiBaseUrl: "{{env.DASHSCOPE_BASE_URL}}"
       apiKey: "{{env.DASHSCOPE_API_KEY}}"

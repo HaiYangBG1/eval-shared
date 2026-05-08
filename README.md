@@ -381,11 +381,31 @@ upload_optimized_prompt("intention-prompt", optimized_messages, label="staging")
 
 ### `.env.example`
 
-五组配置：被测模型 / 评分模型 / Langfuse / eval-online 评估模型 / DSPy 优化模型。
+四组模型角色 + Langfuse 配置，含模型分层策略注释（被测 ＜ 评分 ≤ 优化器）。
 
 ---
 
 ## 环境变量配置
+
+### 模型分层策略
+
+评估体系涉及**四种模型角色**，按能力梯度递增选型：
+
+```
+能力梯度：被测模型 ＜ 评分模型 ≈ 线上评估模型 ≤ DSPy 优化器
+成本梯度：被测模型（最低） → DSPy 优化器（最高）
+```
+
+| 角色 | 选型原则 |
+|------|---------|
+| 🎯 **被测模型** | 成本优先 — 生产环境大量调用，选性价比最高的模型 |
+| 🧑‍⚖️ **评分模型** | 判断力优先 — 准确理解 Rubric 做语义打分，能力须 > 被测模型 |
+| 🧪 **线上评估模型** | 同评分模型 — eval-online LLM-as-Judge，与评分模型同级 |
+| 🧠 **DSPy 优化器** | 质量优先 — 作为「教师」优化 Prompt，能力须 ≥ 评分模型 |
+
+> **核心约束**：优化器在「教」被测模型做事，能力不足则产出的 Prompt 质量受限。三个高级角色可选不同厂商模型，通过百炼或 LiteLLM 统一入口。
+
+### 变量清单
 
 ```bash
 # ── 必需：Langfuse ──
@@ -393,20 +413,21 @@ LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_SECRET_KEY=sk-lf-xxx
 LANGFUSE_HOST=https://your-langfuse.com
 
-# ── 必需：被测模型 ──
+# ── 必需：被测模型（成本优先，选轻量模型）──
 DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 DASHSCOPE_API_KEY=sk-xxx
 
-# ── 必需：PromptFoo 评分模型 ──
+# ── 必需：PromptFoo 评分模型（判断力优先，须强于被测模型）──
 OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 OPENAI_API_KEY=sk-xxx
-PROMPTFOO_GRADING_MODEL=openai:chat:qwen-plus
+PROMPTFOO_GRADING_MODEL=openai:chat:<grading-model-name>
 
 # ── 可选：eval-online（不设时复用 DASHSCOPE_*）──
 # EVAL_MODEL_BASE_URL / EVAL_MODEL_API_KEY / EVAL_MODEL_NAME
 
-# ── 可选：DSPy ──
-# DSPY_LM_MODEL / DSPY_LM_API_BASE / DSPY_LM_API_KEY
+# ── 可选：DSPy（质量优先，须 ≥ 评分模型）──
+# DSPY_LM_MODEL=openai/<optimizer-model-name>
+# DSPY_LM_API_BASE / DSPY_LM_API_KEY
 ```
 
 ---
