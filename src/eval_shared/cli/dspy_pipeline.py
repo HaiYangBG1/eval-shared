@@ -69,8 +69,8 @@ def _annotate_prompt(
     """将评估结果写回 Langfuse Prompt 的 labels。
 
     在 staging prompt 版本上添加 A/B 对比结果标签，如：
-      - ab:pass:67.7→80.6(+12.9)
-      - ab:fail:67.7→16.1(-51.6):17reg
+      - A/B ✅ 67.7%→80.6% (+12.9%)
+      - A/B ❌ 67.7%→16.1% 回归17
     """
     baseline_rate = ab_summary.get("baseline", {}).get("rate", "?")
     candidate_rate = ab_summary.get("candidate", {}).get("rate", "?")
@@ -78,11 +78,13 @@ def _annotate_prompt(
     regressions = ab_summary.get("regressions", 0)
     safe = ab_summary.get("safe_to_upgrade", False)
 
-    # 构造结果标签
-    verdict = "pass" if safe else "fail"
-    label_text = f"ab-{verdict}-{baseline_rate}-to-{candidate_rate}"
+    # 构造可读标签
+    verdict_icon = "✅" if safe else "❌"
+    label_text = f"A/B {verdict_icon} {baseline_rate}%→{candidate_rate}%"
     if regressions:
-        label_text += f"-{regressions}reg"
+        label_text += f" 回归{regressions}"
+    elif rate_diff != 0:
+        label_text += f" ({rate_diff:+.1f}%)"
 
     try:
         with LangfuseClient() as client:
@@ -95,10 +97,9 @@ def _annotate_prompt(
 
             # 保留已有 labels（排除 'latest'——由 Langfuse 系统管理），追加评估结果
             existing_labels = staging.get("labels", [])
-            # 移除旧的 ab- 标签和系统标签
             new_labels = [
                 lb for lb in existing_labels
-                if not lb.startswith("ab-") and lb != "latest"
+                if not lb.startswith("A/B") and lb != "latest"
             ]
             new_labels.append(label_text)
 
