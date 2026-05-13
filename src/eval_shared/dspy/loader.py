@@ -53,14 +53,22 @@ def load_from_langfuse(
     dataset_name: str,
     input_field: str = "query",
     output_field: str = "answer",
+    input_fields: list[str] | None = None,
+    output_fields: list[str] | None = None,
 ) -> list[Any]:
     """
     直接从 Langfuse Dataset API 加载为 dspy.Example 列表。
 
+    支持两种模式：
+      - 单字段（默认）：通过 input_field/output_field 兼容旧配置
+      - 多字段：通过 input_fields/output_fields 列表支持多变量任务
+
     Args:
         dataset_name: Langfuse 上的 dataset 名称
-        input_field: 输入字段名（从 input dict 中提取）
-        output_field: 输出字段名（从 expectedOutput 提取）
+        input_field: 输入字段名（单字段模式，从 input dict 中提取）
+        output_field: 输出字段名（单字段模式，从 expectedOutput 提取）
+        input_fields: 输入字段名列表（多字段模式，优先于 input_field）
+        output_fields: 输出字段名列表（多字段模式，优先于 output_field）
 
     Returns:
         list[dspy.Example]
@@ -77,34 +85,46 @@ def load_from_langfuse(
 
     init_env()
     with LangfuseClient() as client:
-        items = client.get_dataset_items(dataset_name, limit=100)
+        items = client.get_dataset_items(dataset_name)
+
+    # 确定实际使用的字段列表
+    in_fields = input_fields or [input_field]
+    out_fields = output_fields or [output_field]
+    is_multi_input = len(in_fields) > 1
 
     examples = []
     for item in items:
         input_data = item.get("input", {})
         expected = item.get("expectedOutput")
 
-        input_val = (
-            input_data.get(input_field)
-            or input_data.get("question")
-            or json.dumps(input_data, ensure_ascii=False)
-        )
-        # 从 expectedOutput 提取输出值
-        # 1. 如果 expected 是 dict 且含 output_field key，直接取该字段
-        # 2. 否则按原逻辑（字符串直接用 / dict 序列化为 JSON）
-        if isinstance(expected, dict) and output_field in expected:
-            raw = expected[output_field]
-            output_val = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
-        elif isinstance(expected, str):
-            output_val = expected
-        elif expected:
-            output_val = json.dumps(expected, ensure_ascii=False)
+        # ── 构建输入字段 ──
+        fields: dict[str, str] = {}
+        if is_multi_input:
+            # 多字段模式：从 input dict 中逐一提取
+            for f in in_fields:
+                val = input_data.get(f, "")
+                fields[f] = val if isinstance(val, str) else json.dumps(val, ensure_ascii=False)
         else:
-            output_val = ""
+            # 单字段模式（向后兼容）
+            fields[in_fields[0]] = (
+                input_data.get(in_fields[0])
+                or input_data.get("question")
+                or json.dumps(input_data, ensure_ascii=False)
+            )
 
-        ex = dspy.Example(
-            **{input_field: input_val, output_field: output_val}
-        ).with_inputs(input_field)
+        # ── 构建输出字段 ──
+        for f in out_fields:
+            if isinstance(expected, dict) and f in expected:
+                raw = expected[f]
+                fields[f] = raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False)
+            elif isinstance(expected, str):
+                fields[f] = expected
+            elif expected:
+                fields[f] = json.dumps(expected, ensure_ascii=False)
+            else:
+                fields[f] = ""
+
+        ex = dspy.Example(**fields).with_inputs(*in_fields)
         examples.append(ex)
 
     return examples

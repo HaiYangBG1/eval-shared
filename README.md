@@ -31,9 +31,8 @@
 - [环境变量配置](#环境变量配置)
 - [日常工作流](#日常工作流)
 - [CI/CD 集成](#cicd-集成)
-- [从 v1 迁移](#从-v1-迁移)
-- [版本管理](#版本管理)
 - [常见问题](#常见问题)
+- [更新日志与 Bug 记录](#更新日志与-bug-记录)
 
 ---
 
@@ -109,7 +108,7 @@ eval-shared/
 │       ├── loader.py                      #   从 Langfuse/JSON 加载 Example
 │       ├── module_factory.py              #   动态创建 Signature/Module（支持 description_file）
 │       ├── metrics.py                     #   评估指标（exact_match / llm_judge + rubric_file）
-│       ├── uploader.py                    #   优化结果上传 Langfuse
+│       ├── uploader.py                    #   优化结果上传 Langfuse（自动注入 user 消息模板）
 │       └── optimize.py                    #   优化器 CLI 入口
 │
 ├── rubrics/                               # 📋 通用 Rubric 模板（设计参考用）
@@ -125,6 +124,7 @@ eval-shared/
 ├── templates/                             # 📐 评估项目初始化模板
 │   ├── promptfooconfig.template.yaml      #   Agent 测试配置模板
 │   ├── redteam.template.yaml              #   红队安全测试模板
+│   ├── dspy-optimize.template.yaml        #   DSPy 优化配置模板
 │   ├── .env.example                       #   环境变量模板
 │   └── .gitignore                         #   gitignore 模板
 │
@@ -159,12 +159,24 @@ pip install eval-shared
 ### Step 3：从模板复制基础文件
 
 ```bash
-# 找到 eval-shared 安装位置
-SHARED=$(python -c "import eval_shared; import os; print(os.path.dirname(eval_shared.__file__))")
+# 找到 eval-shared 模板目录（兼容源码安装和 wheel 安装）
+TEMPLATES=$(python - <<'PY'
+from pathlib import Path
+import eval_shared
+
+pkg_dir = Path(eval_shared.__file__).resolve().parent
+for path in (pkg_dir.parent / "templates", pkg_dir.parent.parent / "templates"):
+    if path.exists():
+        print(path)
+        break
+else:
+    raise SystemExit("templates directory not found")
+PY
+)
 
 # 复制模板（或直接从 Git 仓库复制）
-cp $SHARED/../../templates/.env.example .env.example
-cp $SHARED/../../templates/.gitignore .gitignore
+cp "$TEMPLATES/.env.example" .env.example
+cp "$TEMPLATES/.gitignore" .gitignore
 cp .env.example .env  # 填入真实密钥
 ```
 
@@ -178,8 +190,8 @@ touch output/.gitkeep
 ### Step 5：创建第一个 Agent 配置
 
 ```bash
-cp $SHARED/../../templates/promptfooconfig.template.yaml agents/intent-agent/promptfooconfig.yaml
-cp $SHARED/../../templates/redteam.template.yaml agents/intent-agent/redteam.yaml
+cp "$TEMPLATES/promptfooconfig.template.yaml" agents/intent-agent/promptfooconfig.yaml
+cp "$TEMPLATES/redteam.template.yaml" agents/intent-agent/redteam.yaml
 ```
 
 替换配置文件中的占位符：`{agent-name}` → `intent-agent`，`{model-name}` → 实际模型名。
@@ -307,19 +319,61 @@ eval-compare --baseline output/v1.json --candidate output/v2.json
 
 ### `eval-promptfoo-ab` — PromptFoo A/B 对比
 
-自动拉取 production 和 staging 的 Prompt，分别跑 PromptFoo 评估，生成对比报告（回归/改善明细）。
+自动拉取 production 和 staging 的 Prompt，分别跑 PromptFoo 评估，生成对比报告 + Langfuse Dataset Run 归档。
 
 ```bash
-# 默认对比 production vs staging
+# 默认：跑 {agent}-golden dataset，启用 cache
 eval-promptfoo-ab --agent intention
 
-# 自定义标签
+# 自定义 prompt label
 eval-promptfoo-ab --agent intention --baseline-label production --candidate-label staging
+
+# 跑 regression dataset 单独验证
+eval-promptfoo-ab --agent intention --dataset intention-regression
+
+# CI 门禁：禁用 cache，全部 case 实跑
+eval-promptfoo-ab --agent intention --no-cache
+
+# 自定义容忍阈值（默认 1.0%，决定 SAME 状态边界）
+eval-promptfoo-ab --agent intention --tolerance 2.0
 ```
 
 输出文件：
 - `output/{agent}-ab-report.md` — Markdown 对比报告
-- `output/{agent}-ab-summary.json` — 机器可读摘要（供流水线读取）
+- `output/{agent}-ab-summary.json` — 机器可读摘要（含 `verdict` / `tolerance` / `cache` / `langfuse_run_names`）
+
+Langfuse 写入：每跑一次创建 2 个 Dataset Run（baseline + candidate），命名 `ab-{role}__{prompt_name}__v{version}__judge-{judge}__{ts}`，cache 命中的 case 复用历史 trace_id，省 LLM 调用。
+
+### `eval-migrate-datasets-v2` — 一次性迁移到三层 dataset 架构
+
+把旧的 `{agent}` dataset 迁移到 `{agent}-golden` + 建空的 `{agent}-regression` / `{agent}-online-temp`。
+
+```bash
+eval-migrate-datasets-v2 --agent intention --dry-run    # 看会做什么
+eval-migrate-datasets-v2 --all                          # 全部 agent 一次性迁移
+eval-migrate-datasets-v2 --agent intention --from-name legacy-intent  # 源名不同时覆盖
+```
+
+- 旧 dataset **不删除**，留作只读备份
+- item.id 用 `compute_item_id(new_dataset, vars)` 复算，保证后续 sync_dataset push 幂等
+- metadata 加 `migrated_from / migrated_at` 审计字段
+
+### `eval-dataset-promote` — online-temp 转入 golden / regression
+
+把 eval-online 收集到 online-temp 的某条有价值用例（如新发现的 edge case）promote 到长期数据集。
+
+```bash
+# 先列源 dataset 帮你挑
+eval-dataset-promote --agent intention --list
+
+# 转入 regression
+eval-dataset-promote --agent intention --to regression \
+    --item-ids cmou123,cmou456 \
+    --reason "新发现的过敏咨询 edge case"
+
+# 转入 golden（默认 to）
+eval-dataset-promote --agent intention --to golden --item-ids ...
+```
 
 ### `eval-dspy-pipeline` — 完整流水线
 
@@ -340,9 +394,16 @@ eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml --dry-run
 1. **Phase 1**: DSPy MIPROv2 优化，结果上传 Langfuse staging
 2. **Phase 2**: PromptFoo A/B 对比（production vs staging）
 3. **Phase 3**: 生成统一决策报告（`output/{agent}-pipeline-report.md`）
-4. **Phase 4**: 自动标注 Langfuse Prompt（如 `A/B ✅ 67.7%→80.6%` 或 `A/B ❌ 67.7%→16.1% 回归17`）
+4. **Phase 4**: 自动标注 Langfuse Prompt 为三态枚举之一：`A/B ✅` / `A/B ❌` / `A/B 🟰`
 
-> **短路机制**：DSPy 优化无提升时自动跳过 Phase 2-4，节省 API 成本。
+> **三态判定（v2.1.0+）**：
+> - ✅ BETTER：`safe_to_upgrade=true`（净改善 + 通过率提升超过 tolerance）
+> - ❌ WORSE：有回归 或 通过率下降超过 tolerance
+> - 🟰 SAME：变化在 ±tolerance 内（默认 1.0%），或 DSPy 优化跳过 A/B
+>
+> Label 是干净枚举值，promote 时自动剥离，不再污染 production 版本。
+
+> **短路机制**：DSPy 优化无提升时自动跳过 Phase 2-4，节省 API 成本，并在 staging prompt 上打 🟰 标识。
 
 ---
 
@@ -549,62 +610,6 @@ steps:
 
 ---
 
-## 从 v1 迁移
-
-v2.0 将 eval-shared 从 Node.js/npm 包迁移为 Python 包。**CLI 命令名完全保持不变**。
-
-### 业务项目变更
-
-```diff
- # package.json — 移除 eval-shared npm 依赖
- "devDependencies": {
-   "promptfoo": "^0.121.0",
--  "eval-shared": "^1.0.0"
- }
-```
-
-```bash
-# 改用 pip 安装
-pip install eval-shared
-# 或
-uv pip install eval-shared
-```
-
-**npm scripts 不需要改**：
-
-```json
-{
-  "sync:dataset": "eval-sync-dataset",
-  "sync:prompt": "eval-sync-prompt"
-}
-```
-
-> 只要 eval-shared 的 CLI 在 PATH 中（pip install 后自动注册），npm scripts 照样能调用。
-
-### 架构改进
-
-| 维度 | v1 (JS) | v2 (Python) |
-|------|---------|-------------|
-| 语言 | Node.js | Python 3.11+ |
-| 包管理 | npm | pip / uv |
-| Langfuse 客户端 | 7 个脚本各自实现 | 统一 `langfuse_client.py` |
-| DSPy 支持 | 仅导出 JSON | 加载 + 优化 + 上传全链路 |
-| 依赖管理 | `package.json` | `pyproject.toml` |
-
----
-
-## 版本管理
-
-| 变更类型 | 版本号 | 示例 |
-|----------|--------|------|
-| 新增功能 | minor (`2.1.0`) | 新增 DSPy MIPROv2 优化 |
-| 修复 bug | patch (`2.0.1`) | 修正 sync-dataset 分页 |
-| 破坏性变更 | major (`3.0.0`) | 修改 CLI 参数接口 |
-
-**原则**：只有 **≥ 2 个项目需要** 的规则才上推到本仓库。
-
----
-
 ## 常见问题
 
 ### Q: CLI 命令找不到？
@@ -627,6 +632,13 @@ PromptFoo 对 `$ref` 返回的数组展开后丢失 `type` 字段。请将断言
 ### Q: 业务项目同时需要 npm 和 pip？
 
 是的。npm 管理 PromptFoo，pip 管理 eval-shared CLI 和 DSPy。这在 AI/ML 项目中很常见。
+
+---
+
+## 更新日志与 Bug 记录
+
+- [CHANGELOG.md](./CHANGELOG.md) — 版本更新日志、v1→v2 迁移记录、版本号约定。
+- [docs/BUGFIXES.md](./docs/BUGFIXES.md) — 历史 bug 的「症状 / 根因 / 修复」详细记录，方便回查。
 
 ---
 

@@ -31,7 +31,7 @@ def main(agent: str, output_path: str | None):
     click.echo(f"📦 从 Langfuse 导出数据集：{agent}")
 
     with LangfuseClient() as client:
-        items = client.get_dataset_items(agent, limit=200)
+        items = client.get_dataset_items(agent)
 
     examples = []
     for item in items:

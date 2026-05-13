@@ -30,7 +30,7 @@ from eval_shared.common.config import init_env
 from eval_shared.common.yaml_utils import load_yaml
 
 
-def _configure_dspy_lm() -> None:
+def _configure_dspy_lm(timeout: int = 120) -> None:
     """配置 DSPy LM（从环境变量读取）。"""
     import dspy
     from eval_shared.common.config import get_dspy_lm_config
@@ -41,35 +41,46 @@ def _configure_dspy_lm() -> None:
         api_base=cfg["api_base"],
         api_key=cfg["api_key"],
         temperature=0.0,  # 优化阶段用 0，减少随机性
+        timeout=timeout,  # 超时自动中断并重试（默认重试 3 次）
     )
     dspy.configure(lm=lm)
     click.echo(f"  LM        : {cfg['model']}")
     click.echo(f"  API Base  : {cfg['api_base']}")
+    click.echo(f"  Timeout   : {timeout}s（超时自动重试）")
 
 
 def _load_examples(config: dict) -> list:
-    """根据配置加载 dspy.Example 列表。"""
+    """根据配置加载 dspy.Example 列表。支持单字段和多字段两种模式。"""
     from eval_shared.dspy.loader import load_from_langfuse, load_from_json
 
     source = config.get("source", "langfuse")
     task = config.get("task", {})
 
-    # 从任务配置中获取第一个输入/输出字段名
-    input_fields = task.get("input_fields", [{"name": "query"}])
-    output_fields = task.get("output_fields", [{"name": "answer"}])
-    input_field = input_fields[0]["name"]
-    output_field = output_fields[0]["name"]
+    # 获取字段配置
+    input_field_defs = task.get("input_fields", [{"name": "query"}])
+    output_field_defs = task.get("output_fields", [{"name": "answer"}])
+    input_names = [f["name"] for f in input_field_defs]
+    output_names = [f["name"] for f in output_field_defs]
 
     if source == "json":
         json_path = config.get("json_path")
         if not json_path:
             raise click.ClickException("source=json 时必须指定 json_path")
-        return load_from_json(json_path, input_field, output_field)
+        if len(input_names) > 1:
+            from eval_shared.dspy.loader import load_from_json_multi
+            return load_from_json_multi(json_path, input_names, output_names)
+        return load_from_json(json_path, input_names[0], output_names[0])
     else:
         dataset_name = config.get("dataset", "")
         if not dataset_name:
             raise click.ClickException("source=langfuse 时必须指定 dataset")
-        return load_from_langfuse(dataset_name, input_field, output_field)
+        return load_from_langfuse(
+            dataset_name,
+            input_field=input_names[0],
+            output_field=output_names[0],
+            input_fields=input_names if len(input_names) > 1 else None,
+            output_fields=output_names if len(output_names) > 1 else None,
+        )
 
 
 def _split_data(examples: list, train_ratio: float = 0.7) -> tuple[list, list]:
@@ -80,7 +91,7 @@ def _split_data(examples: list, train_ratio: float = 0.7) -> tuple[list, list]:
 
 
 def _run_evaluation(module, dev_data: list, metric, label: str = "") -> float:
-    """运行评估并返回分数。"""
+    """运行评估并返回 [0, 1] 区间的分数。"""
     import dspy
 
     evaluator = dspy.Evaluate(
@@ -91,12 +102,16 @@ def _run_evaluation(module, dev_data: list, metric, label: str = "") -> float:
         display_table=0,
     )
     result = evaluator(module)
-    # DSPy 新版返回 EvaluationResult 对象，旧版返回 float
-    if isinstance(result, (int, float)):
-        score = float(result) / 100.0  # DSPy 返回百分比
-    else:
-        # EvaluationResult 对象，取其数值
-        score = float(result) / 100.0 if float(result) > 1 else float(result)
+    # DSPy 不同版本返回值差异：
+    #   - 旧版：直接返回 float（百分比 0-100 或比例 0-1）
+    #   - 新版：返回 EvaluationResult 对象，含 .score 字段
+    raw = getattr(result, "score", result)
+    try:
+        score_val = float(raw)
+    except (TypeError, ValueError):
+        click.echo(f"  ⚠️ 无法解析评估结果：{raw!r}，回退为 0.0", err=True)
+        score_val = 0.0
+    score = score_val / 100.0 if score_val > 1.0 else score_val
     if label:
         click.echo(f"\n  {label}: {score:.2%}")
     return score
@@ -337,7 +352,11 @@ def main(config_path: str, dry_run: bool, seed: int):
         label = output_config.get("label", "staging")
         click.echo(f"\n  📤 上传到 Langfuse: {prompt_name} (label={label})")
         from eval_shared.dspy.uploader import upload_from_module
-        upload_from_module(optimized_module, prompt_name, label)
+        upload_from_module(
+            optimized_module, prompt_name, label,
+            input_fields=input_names,
+            user_template_file=task_config.get("description_file"),
+        )
     elif upload and not prompt_name:
         click.echo("  ⚠️  upload_langfuse=true 但未指定 prompt_name，跳过上传")
 

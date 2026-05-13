@@ -1,5 +1,5 @@
 # RAG 忠实度 Rubric — 适用于所有基于知识库/上下文的 Agent
-# 引用方式：$ref: node_modules/eval-shared/rubrics/faithfulness.yaml#/assert
+# 使用方式：复制 assert 数组到项目 promptfooconfig.yaml 中内联使用；不要直接 $ref。
 assert:
   - type: llm-rubric
     value: |

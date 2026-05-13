@@ -20,6 +20,11 @@ from pathlib import Path
 
 import click
 
+from eval_shared.common.ab_verdict import (
+    AB_VERDICT_LABELS,
+    ABVerdict,
+    verdict_from_ab_summary,
+)
 from eval_shared.common.config import init_env
 from eval_shared.common.langfuse_client import LangfuseClient
 from eval_shared.common.yaml_utils import load_yaml
@@ -61,50 +66,30 @@ def _extract_agent_from_config(config: dict) -> str:
     return ""
 
 
-def _annotate_prompt(
-    prompt_name: str,
-    ab_summary: dict,
-    dspy_report: dict | None = None,
-) -> None:
-    """将评估结果写回 Langfuse Prompt 的 labels。
+def _annotate_prompt(prompt_name: str, verdict: ABVerdict) -> None:
+    """在 Langfuse staging Prompt 上写入 A/B verdict label（三态枚举之一）。
 
-    在 staging prompt 版本上添加 A/B 对比结果标签，如：
-      - A/B ✅ 67.7%→80.6% (+12.9%)
-      - A/B ❌ 67.7%→16.1% 回归17
+    剥离全部历史 A/B 枚举值（保证 label 集合永远在 3 个枚举内不膨胀），
+    再追加新的 verdict。详细数字明细不再编码进 label，由 Dataset Run metadata 承载。
     """
-    baseline_rate = ab_summary.get("baseline", {}).get("rate", "?")
-    candidate_rate = ab_summary.get("candidate", {}).get("rate", "?")
-    rate_diff = ab_summary.get("rate_diff", 0)
-    regressions = ab_summary.get("regressions", 0)
-    safe = ab_summary.get("safe_to_upgrade", False)
-
-    # 构造可读标签
-    verdict_icon = "✅" if safe else "❌"
-    label_text = f"A/B {verdict_icon} {baseline_rate}%→{candidate_rate}%"
-    if regressions:
-        label_text += f" 回归{regressions}"
-    elif rate_diff != 0:
-        label_text += f" ({rate_diff:+.1f}%)"
-
     try:
         with LangfuseClient() as client:
-            # 获取当前 staging 版本号
             staging = client.get_prompt(prompt_name, label="staging")
             version = staging.get("version")
             if not version:
                 click.echo(f"  ⚠️ 无法获取 {prompt_name} staging 版本号，跳过标注")
                 return
 
-            # 保留已有 labels（排除 'latest'——由 Langfuse 系统管理），追加评估结果
+            # 剥离已有 A/B 枚举值（保证集合不膨胀），'latest' 由 Langfuse 自管不动
             existing_labels = staging.get("labels", [])
             new_labels = [
                 lb for lb in existing_labels
-                if not lb.startswith("A/B") and lb != "latest"
+                if lb not in AB_VERDICT_LABELS and lb != "latest"
             ]
-            new_labels.append(label_text)
+            new_labels.append(verdict.value)
 
             client.update_prompt_labels(prompt_name, version, new_labels)
-            click.echo(f"  ✅ 已标注 Langfuse: {prompt_name} v{version} ← {label_text}")
+            click.echo(f"  ✅ 已标注 Langfuse: {prompt_name} v{version} ← {verdict.value}")
 
     except Exception as e:
         click.echo(f"  ⚠️ Langfuse 标注失败（不影响流程）: {e}")
@@ -191,7 +176,7 @@ def _generate_pipeline_report(
                 "### ✅ 建议：执行升级",
                 "",
                 f"DSPy 优化产生了 {delta:+.2%} 的提升，"
-                "且 PromptFoo 回归测试无回归。",
+                "且 PromptFoo A/B 对比满足净改善策略。",
                 "",
                 "执行以下命令完成升级：",
                 "```bash",
@@ -308,6 +293,11 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
             Path(report_path).parent.mkdir(parents=True, exist_ok=True)
             Path(report_path).write_text(report, encoding="utf-8")
             click.echo(f"\n📊 决策报告 → {report_path}")
+
+            # 跳过 A/B 也要在 staging prompt 上打 🟰，避免后续 promote 看到旧的评估状态
+            prompt_name = config.get("output", {}).get("prompt_name", f"{agent}-prompt")
+            _annotate_prompt(prompt_name, ABVerdict.SAME)
+
             click.echo("\n❌ 本次优化未产生提升，不建议切换。")
             return
     else:
@@ -326,6 +316,14 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
         "--baseline-label", "production",
         "--candidate-label", "staging",
     ]
+    # ab.tolerance / ab.dataset / ab.sync_dataset 配置透传（dspy-optimize.yaml 可覆盖 CLI 默认）
+    ab_cfg = config.get("ab", {}) if isinstance(config.get("ab"), dict) else {}
+    if "tolerance" in ab_cfg:
+        ab_cmd.extend(["--tolerance", str(float(ab_cfg["tolerance"]))])
+    if "dataset" in ab_cfg and isinstance(ab_cfg["dataset"], str):
+        ab_cmd.extend(["--dataset", ab_cfg["dataset"]])
+    if ab_cfg.get("sync_dataset") is True:
+        ab_cmd.append("--sync-dataset")
     _run_cmd(ab_cmd, "PromptFoo A/B 对比")
 
     # ═══ Phase 3: 统一决策报告 ═══
@@ -356,7 +354,8 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
 
     if Path(ab_summary_path).exists():
         ab_summary = json.loads(Path(ab_summary_path).read_text("utf-8"))
-        _annotate_prompt(prompt_name, ab_summary, dspy_report)
+        verdict = verdict_from_ab_summary(ab_summary)
+        _annotate_prompt(prompt_name, verdict)
     else:
         click.echo("  ⚠️ 未找到 A/B 摘要文件，跳过标注")
 

@@ -25,11 +25,34 @@ from eval_shared.common.langfuse_client import LangfuseClient
 from eval_shared.common.yaml_utils import load_yaml
 
 
+def _online_dataset_name(agent: str) -> str:
+    return f"{agent}-online-temp"
+
+
+def _online_run_name(agent: str, score_name: str, ts: datetime) -> str:
+    """eval-online Dataset Run 命名约定。
+
+    用 `online-` 前缀区分 A/B 的 `ab-baseline/ab-candidate` 前缀。
+    """
+    return f"online-{agent}-{score_name}-{ts.strftime('%Y%m%dT%H%M%SZ')}"
+
+
 # ── 字段提取 ──
 
 def _extract_field(obs: dict, jsonpath: str) -> Any:
-    """简易 JSONPath 提取（支持 $.key、$[n]、$.key[n].subkey 等）。"""
-    if not jsonpath or jsonpath == "$.input":
+    """简易 JSONPath 提取（支持 $.key、$[n]、$.key[n].subkey 等）。
+
+    不支持：通配符 [*]、过滤器 ?(...)、递归下降 ..、脚本表达式
+    遇到不支持的语法会抛出 ValueError。
+    """
+    if not jsonpath:
+        return obs.get("input")
+    for token in ("[*]", "?(", "..", "@."):
+        if token in jsonpath:
+            raise ValueError(
+                f'jsonpath 含不支持的语法："{jsonpath}"（仅支持 $.key、$[n]、$.key[n].subkey）'
+            )
+    if jsonpath == "$.input":
         return obs.get("input")
     if jsonpath == "$.output":
         return obs.get("output")
@@ -140,6 +163,7 @@ def _parse_score(text: str, score_type: str, allowed_values: list | None) -> flo
 def _process_evaluator(
     evaluator: dict,
     since: str,
+    hours: int,
     client: LangfuseClient,
     eval_config: dict,
     limit: int,
@@ -152,6 +176,7 @@ def _process_evaluator(
     name = evaluator.get("name")
     score_name = evaluator.get("scoreName")
     score_type = evaluator.get("scoreType", "NUMERIC")
+    agent = evaluator.get("agent")  # 可选；填了启用 Dataset Run 写入到 {agent}-online-temp
 
     # rubric 来源
     rubric = evaluator.get("rubric")
@@ -187,10 +212,15 @@ def _process_evaluator(
     if not observations:
         return
 
-    existing_scores = client.get_scores(score_name)
+    # 仅拉取观察窗口内的 score，避免 score 量大时全表扫描
+    existing_scores = client.get_scores(score_name, from_timestamp=since)
     scored_keys = {
         f"{s['traceId']}|{s.get('observationId', '')}" for s in existing_scores
     }
+
+    # Dataset Run 写入收集（仅 evaluator 配了 agent 且非 dry-run 时启用）
+    online_dataset = _online_dataset_name(agent) if agent else None
+    online_evaluations: list[tuple[dict, float, str]] = []  # (obs, score, item_id)
 
     eval_count = 0
     for obs in observations:
@@ -238,16 +268,45 @@ def _process_evaluator(
             )
 
             if not dry_run:
+                # BOOLEAN 类型 Langfuse 期望 0/1 整数；其他类型保持 float
+                write_value = (
+                    int(round(score)) if score_type == "BOOLEAN" else score
+                )
                 client.write_score({
                     "traceId": obs["traceId"],
                     "observationId": obs["id"],
                     "name": score_name,
-                    "value": score,
+                    "value": write_value,
                     "dataType": score_type,
                     "source": "API",
                     "comment": f"eval-online 自动评估 ({eval_config['model_name']})",
                 })
                 summary["written"] += 1
+
+                # Dataset Run 写入：把这条线上 obs 转为 online-temp 的 dataset item
+                if online_dataset:
+                    try:
+                        item = client.upsert_dataset_item({
+                            "datasetName": online_dataset,
+                            "input": obs.get("input"),
+                            "expectedOutput": None,
+                            "metadata": {
+                                "source": "eval-online",
+                                "observation_name": name,
+                                "score_name": score_name,
+                                "score_value": float(score),
+                            },
+                            "sourceTraceId": obs["traceId"],
+                            "sourceObservationId": obs["id"],
+                        })
+                        item_id = item.get("id")
+                        if item_id:
+                            online_evaluations.append((obs, float(score), item_id))
+                    except Exception as e:
+                        click.echo(
+                            f"   ⚠️ dataset item 写入失败（不影响 score）: {e}",
+                            err=True,
+                        )
 
         except Exception as e:
             click.echo(f'   ❌ 评估失败 ({obs["id"]}): {e}', err=True)
@@ -256,6 +315,56 @@ def _process_evaluator(
         time.sleep(0.2)
 
     click.echo(f"   完成: 评估 {eval_count} 条")
+
+    # 写 Dataset Run（仅 evaluator 配了 agent 且收集到数据时）
+    if online_dataset and online_evaluations and not dry_run:
+        run_name = _online_run_name(agent, score_name, datetime.now(timezone.utc))
+        pass_count = sum(1 for (_, s, _) in online_evaluations if s >= 0.5)
+        total = len(online_evaluations)
+        run_metadata = {
+            "source": "eval-online",
+            "agent": agent,
+            "evaluator_name": name,
+            "score_name": score_name,
+            "score_type": score_type,
+            "judge_model": eval_config["model_name"],
+            "time_window_hours": hours,
+            "since": since,
+            "total_evaluated": total,
+            "pass_count": pass_count,
+            "fail_count": total - pass_count,
+            "pass_rate": pass_count / total if total else 0.0,
+        }
+        first_metadata: dict | None = run_metadata
+        posted = 0
+        for (obs, _score, item_id) in online_evaluations:
+            try:
+                client.create_dataset_run_item(
+                    run_name=run_name,
+                    dataset_item_id=item_id,
+                    trace_id=obs["traceId"],
+                    observation_id=obs["id"],
+                    metadata=first_metadata,
+                    run_description=(
+                        f"eval-online {score_name} for {agent} ({hours}h window)"
+                        if first_metadata else None
+                    ),
+                )
+                posted += 1
+                first_metadata = None  # 仅第一个 item 带 metadata（first-write-wins）
+            except Exception as e:
+                click.echo(
+                    f"   ⚠️ run-item 写入失败 (obs={obs.get('id', '?')[:16]}...): {e}",
+                    err=True,
+                )
+
+        summary.setdefault("runs", []).append({
+            "agent": agent,
+            "run_name": run_name,
+            "items": posted,
+            "pass_rate": run_metadata["pass_rate"],
+        })
+        click.echo(f"   📦 Dataset Run: {run_name}（{posted}/{total} items）")
 
 
 @click.command()
@@ -292,12 +401,31 @@ def main(config_path: str, hours: int, limit: int, dry_run: bool, force: bool, v
     click.echo(f"  评估器数量: {len(config['evaluators'])}")
     click.echo("")
 
-    summary = {"total": 0, "scored": 0, "skipped": 0, "errors": 0, "written": 0}
+    summary = {"total": 0, "scored": 0, "skipped": 0, "errors": 0, "written": 0, "runs": []}
 
     with LangfuseClient(langfuse_cfg) as client:
+        # 跑前清空所有 agent 的 online-temp dataset（覆盖式策略，按用户约定）
+        online_agents: set[str] = {
+            e["agent"] for e in config["evaluators"]
+            if isinstance(e.get("agent"), str)
+        }
+        if online_agents and not dry_run:
+            click.echo("━━━ 清空 online-temp datasets ━━━")
+            for agent_name in sorted(online_agents):
+                ds_name = _online_dataset_name(agent_name)
+                if not client.dataset_exists(ds_name):
+                    client.create_dataset(
+                        ds_name,
+                        f"eval-online 工作区（覆盖式），auto-managed for {agent_name}",
+                    )
+                    click.echo(f"  ✨ 新建 {ds_name}")
+                deleted = client.delete_all_dataset_items(ds_name)
+                click.echo(f"  🧹 清空 {ds_name}（删除 {deleted} items）")
+            click.echo("")
+
         for evaluator in config["evaluators"]:
             _process_evaluator(
-                evaluator, since, client, eval_cfg, limit,
+                evaluator, since, hours, client, eval_cfg, limit,
                 dry_run, force, verbose, summary, str(cfg_path),
             )
 
@@ -308,6 +436,14 @@ def main(config_path: str, hours: int, limit: int, dry_run: bool, force: bool, v
     click.echo(f"  本次评估         : {summary['scored']}")
     click.echo(f"  写回 Langfuse    : {summary['written']}")
     click.echo(f"  评估失败         : {summary['errors']}")
+
+    runs = summary.get("runs") or []
+    if runs:
+        click.echo(f"  Dataset Runs     : {len(runs)}")
+        for r in runs:
+            click.echo(
+                f"    📦 {r['run_name']}（{r['items']} items, pass_rate={r['pass_rate']:.2%}）"
+            )
     click.echo("")
 
     if summary["errors"] > 0:

@@ -1,5 +1,5 @@
 # 幻觉检测 Rubric — 通用场景（非 RAG 专用）
-# 引用方式：$ref: node_modules/eval-shared/rubrics/no-hallucination.yaml#/assert
+# 使用方式：复制 assert 数组到项目 promptfooconfig.yaml 中内联使用；不要直接 $ref。
 assert:
   - type: llm-rubric
     value: |

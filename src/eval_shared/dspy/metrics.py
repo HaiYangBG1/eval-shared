@@ -138,10 +138,13 @@ def make_llm_judge_metric(
 
         # 如果 rubric 中有 {{input}} / {{output}} 占位符，替换为实际值
         # 这样 DSPy 可以复用 eval-specs 中的同一份 rubric 模板
-        input_fields = [f for f in dir(example) if not f.startswith("_")
-                        and f not in output_fields]
+        # 用 example.inputs().keys() 取真正的输入字段，避免 dir() 引入 dspy 内部属性
+        try:
+            input_keys = list(example.inputs().keys())
+        except (AttributeError, TypeError):
+            input_keys = list(getattr(example, "_input_keys", None) or [])
         input_text = " | ".join(
-            f"{f}={getattr(example, f, '')}" for f in input_fields
+            f"{f}={getattr(example, f, '')}" for f in input_keys
             if hasattr(example, f)
         )
 
