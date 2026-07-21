@@ -268,6 +268,35 @@ def test_fetch_scores_indexes_by_trace_id() -> None:
     assert result == {"trc-1": 1.0, "trc-2": 0.0, "trc-9": 1.0}
 
 
+def test_fetch_scores_falls_back_to_trace_id_when_dataset_run_scores_missing() -> None:
+    run_a = "ab-baseline__p__v17__judge-m__t1"
+    client = FakeScoresClient(
+        runs=[{"name": run_a, "id": "rid-A"}],
+        run_items={
+            run_a: [
+                {"datasetItemId": "item-1", "traceId": "trc-1"},
+                {"datasetItemId": "item-2", "traceId": "trc-2"},
+            ]
+        },
+        scores_by_run_id={
+            "rid-A": [
+                {"traceId": "trc-1", "value": 1.0, "name": PROMPTFOO_PASS_SCORE_NAME},
+            ],
+            None: [
+                {"traceId": "trc-2", "value": 0.0, "name": PROMPTFOO_PASS_SCORE_NAME},
+            ],
+        },
+    )
+
+    result = fetch_scores_by_trace_id(
+        client,  # type: ignore[arg-type]
+        dataset_name="intention-golden",
+        source_run_names=[run_a],
+    )
+
+    assert result == {"trc-1": 1.0, "trc-2": 0.0}
+
+
 def test_fetch_scores_skips_runs_missing_id() -> None:
     """run 没有 id（被并发删等）时跳过，不抛异常。"""
     run_x = "ab-baseline__p__v17__judge-m__t1"

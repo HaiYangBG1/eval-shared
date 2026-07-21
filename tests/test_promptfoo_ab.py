@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from eval_shared.cli.promptfoo_ab import (
     _build_run_metadata,
+    _downgrade_scoreless_hits_to_miss,
     _infer_local_dataset_path,
     _merge_hit_and_miss,
     _vars_key,
@@ -36,7 +37,7 @@ def test_no_change_is_not_marked_safe_when_using_net_improvement_gate() -> None:
 
     assert is_safe_to_upgrade(base_stats, cand_stats, regressions, improvements) is False
     assert "✅ **安全升级**" not in report
-    assert "无净改善" in report
+    assert "无明显改善" in report
 
 
 def test_vars_key_is_independent_of_dict_order() -> None:
@@ -119,6 +120,24 @@ def test_merge_treats_missing_hit_score_as_fail() -> None:
     )
     assert results[0]["success"] is False
     assert results[0]["_cache_hit"] is True
+
+
+def test_downgrade_scoreless_hits_to_miss() -> None:
+    cache = CacheLookupResult(
+        hits={"item-ok": "trc-ok", "item-missing": "trc-missing"},
+        miss_item_ids=["item-new"],
+        source_run_names=["run-1"],
+    )
+
+    result = _downgrade_scoreless_hits_to_miss(
+        cache,
+        {"trc-ok": 1.0},
+        role="Baseline",
+    )
+
+    assert result.hits == {"item-ok": "trc-ok"}
+    assert result.miss_item_ids == ["item-new", "item-missing"]
+    assert result.source_run_names == ["run-1"]
 
 
 def test_merge_treats_missing_miss_result_as_fail() -> None:
@@ -410,3 +429,74 @@ def test_improvement_without_regression_is_marked_safe() -> None:
 
     assert is_safe_to_upgrade(base_stats, cand_stats, regressions, improvements) is True
     assert "✅ **安全升级**" in report
+
+
+def test_regression_blocks_safe_upgrade_even_with_net_improvement() -> None:
+    baseline = [
+        {"vars": {"query": "regressed"}, "success": True},
+        {"vars": {"query": "fixed-1"}, "success": False},
+        {"vars": {"query": "fixed-2"}, "success": False},
+        {"vars": {"query": "fixed-3"}, "success": False},
+    ]
+    candidate = [
+        {"vars": {"query": "regressed"}, "success": False},
+        {"vars": {"query": "fixed-1"}, "success": True},
+        {"vars": {"query": "fixed-2"}, "success": True},
+        {"vars": {"query": "fixed-3"}, "success": True},
+    ]
+    base_stats = calc_stats(baseline)
+    cand_stats = calc_stats(candidate)
+    regressions, improvements = find_regressions_and_improvements(baseline, candidate)
+
+    report = generate_ab_report(
+        "agent",
+        "production",
+        "staging",
+        base_stats,
+        cand_stats,
+        regressions,
+        improvements,
+        "base.json",
+        "cand.json",
+    )
+
+    assert len(regressions) == 1
+    assert len(improvements) == 3
+    assert float(cand_stats["rate"]) > float(base_stats["rate"])
+    assert is_safe_to_upgrade(base_stats, cand_stats, regressions, improvements) is False
+    assert "✅ **安全升级**" not in report
+    assert "⚠️ **存在回归**" in report
+
+
+def test_improvement_within_tolerance_is_not_safe() -> None:
+    """0 < rate_diff <= tolerance 时 verdict 为 SAME，报告不得写"安全升级"。"""
+    baseline = [{"vars": {"query": f"q{i}"}, "success": i != 0} for i in range(100)]
+    candidate = [{"vars": {"query": f"q{i}"}, "success": True} for i in range(100)]
+    base_stats = calc_stats(baseline)
+    cand_stats = calc_stats(candidate)
+    regressions, improvements = find_regressions_and_improvements(baseline, candidate)
+
+    assert len(regressions) == 0
+    assert len(improvements) == 1  # 提升 1.0%，落在 tolerance=1.0 区间内
+
+    report = generate_ab_report(
+        "agent",
+        "production",
+        "staging",
+        base_stats,
+        cand_stats,
+        regressions,
+        improvements,
+        "base.json",
+        "cand.json",
+        tolerance=1.0,
+    )
+
+    assert (
+        is_safe_to_upgrade(
+            base_stats, cand_stats, regressions, improvements, tolerance=1.0
+        )
+        is False
+    )
+    assert "✅ **安全升级**" not in report
+    assert "➡️ **无明显改善**" in report

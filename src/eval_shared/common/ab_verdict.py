@@ -11,8 +11,8 @@ from enum import Enum
 class ABVerdict(str, Enum):
     """A/B 对比结论的三态枚举。
 
-    - ✅ BETTER：候选明确优于基线（净改善：改善数 > 回归数 且 通过率不降）
-    - ❌ WORSE ：候选存在回归 或 通过率下降
+    - ✅ BETTER：候选明确优于基线（无回归、有改善、通过率提升 > tolerance）
+    - ❌ WORSE ：候选存在任何回归（回归优先，一票阻断）或 通过率下降超过 tolerance
     - 🟰 SAME  ：变化不显著（含 DSPy 优化跳过 A/B 的情况）
     """
 

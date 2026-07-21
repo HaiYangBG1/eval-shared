@@ -33,9 +33,10 @@ defaultTest:
         apiKey: "{{env.OPENAI_API_KEY}}"
   assert:
     # 单次调用延迟阈值（根据 Agent 复杂度调整，分类任务建议 5s，生成任务建议 10-15s）
-    # DashScope 延迟波动大时建议加 weight: 0 只监控不阻断
+    # 强制 weight: 0：延迟仅监控不阻断，避免 API 延迟波动造成非质量原因的失败
     - type: latency
       threshold: 5000
+      weight: 0
 
     # ⚠️ 不要使用 cost 断言！
     # 非 OpenAI 官方 API（百炼、DeepSeek、LiteLLM 等）通常不返回 cost 字段，

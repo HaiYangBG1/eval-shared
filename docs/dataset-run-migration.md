@@ -766,6 +766,9 @@ $ eval-migrate-datasets-v2 --all
 - `promptfoo_ab.py` 加 `--sync-dataset` 选项，跑前从 Langfuse 拉最新 dataset 覆盖本地 YAML（默认关，CI 推荐开）
 - `dspy_pipeline.py` 透传 `ab.sync_dataset` 配置项
 - `migrate_datasets_v2.py` 加 `_assign_variant_for_duplicates` 自动处理 vars 重复（解决 replenish 7 条会丢失的问题）
+- 2026-05-13 补丁：`dspy_pipeline.py` 的 agent 推断改为优先读取 `output.prompt_name`，并兜底剥离 `{agent}-golden` / `{agent}-regression` / `{agent}-online-temp` 后缀，避免把三层 dataset 名误当成本地 `agents/` 目录名。
+- 2026-05-13 补丁：`promptfoo_ab.py` 的 `safe_to_upgrade` 和 `dspy_pipeline.py` 终端建议改为回归优先；只要存在 PASS→FAIL 回归，即使净通过率提升也保持 `A/B ❌` / 暂缓升级。
+- 2026-05-13 补丁：A/B cache 命中后 score 查询增加 traceId 回退；仍缺 score 的 hit 降级为 miss 重跑，避免复用历史 trace 时本地统计把缺 score 误算成 fail。
 
 测试：108 → 114（+6）。
 

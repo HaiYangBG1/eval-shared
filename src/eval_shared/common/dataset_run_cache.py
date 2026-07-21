@@ -168,12 +168,27 @@ def fetch_scores_by_trace_id(
             run_id = run.get("id")
             if not run_id:
                 continue
+            run_trace_ids = [
+                item.get("traceId")
+                for item in run.get("datasetRunItems", [])
+                if item.get("traceId")
+            ]
             scores = client.list_scores(dataset_run_id=run_id, name=score_name)
             for s in scores:
                 tid = s.get("traceId")
                 value = s.get("value")
                 if tid and isinstance(value, (int, float)):
                     by_trace[tid] = float(value)
+            # Langfuse 不总是把复用 trace 的 score 暴露在 datasetRunId 查询下；
+            # 对缺失项回退到 traceId 精确查询，保证本地 stats 不把 cache hit 误判为 fail。
+            for tid in run_trace_ids:
+                if tid in by_trace:
+                    continue
+                for s in client.list_scores(trace_id=tid, name=score_name):
+                    value = s.get("value")
+                    if isinstance(value, (int, float)):
+                        by_trace[tid] = float(value)
+                        break
         except Exception:
             # 单 run 取不到不影响整体（可能被并发删除），跳过
             continue

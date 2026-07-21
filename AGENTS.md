@@ -20,7 +20,7 @@ templates/           # 业务项目脚手架：promptfooconfig / redteam / dspy-
 tests/               # pytest 测试
 ```
 
-CLI 入口在 `pyproject.toml [project.scripts]`：`eval-sync-dataset`、`eval-sync-prompt`、`eval-online`、`eval-export-dspy`、`eval-promote`、`eval-report`、`eval-compare`、`eval-promptfoo-ab`、`eval-dspy-optimize`、`eval-dspy-pipeline`。
+CLI 入口在 `pyproject.toml [project.scripts]`（12 条）：`eval-sync-dataset`、`eval-sync-prompt`、`eval-online`、`eval-export-dspy`、`eval-promote`、`eval-report`、`eval-compare`、`eval-promptfoo-ab`、`eval-dspy-optimize`、`eval-dspy-pipeline`、`eval-dataset-promote`、`eval-migrate-datasets-v2`。
 
 ## 环境与运行
 
@@ -47,7 +47,7 @@ eval-sync-dataset --agent <agent> --direction pull
 | **PromptFoo 归属** | PromptFoo 仍由业务项目的 npm 安装，本包不依赖。CLI 只通过 `subprocess` 或文件交互。 |
 | **Langfuse 客户端** | 统一走 `common/langfuse_client.py`，CLI 不要直接 `httpx` Langfuse API。`LangfuseClient.__init__` 支持 `http_client` 注入用于测试。 |
 | **环境变量双名兼容** | `LANGFUSE_HOST` 与 `LANGFUSE_BASE_URL` 都接受，`HOST` 优先。文档新增示例时两者都要提。 |
-| **升级判定策略** | A/B 报告的 `safe_to_upgrade` 用「净改善」：改善数 > 回归数 且 通过率 ≥ 基线。避免 latency 等基础设施噪音阻塞合理升级。 |
+| **升级判定策略** | **回归优先，一票阻断**：任何回归（baseline PASS → candidate FAIL）→ ❌ WORSE；无回归、有改善、通过率提升 > tolerance → ✅ BETTER；其余 → 🟰 SAME。`safe_to_upgrade` 等价于 verdict == BETTER（见 `common/ab_verdict.py`）。latency 等基础设施噪音应通过断言 `weight: 0` 排除，而不是靠判定口径放宽。 |
 | **promote 阻断门** | `eval-promote` 检测到 `A/B ❌` 标签会拒绝；人工确认是噪音时用 `--force` 兜底。 |
 
 ## 模型分层（写文档/示例时必须保持一致）

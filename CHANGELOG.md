@@ -12,6 +12,27 @@
 
 ---
 
+## [2.1.1] - 2026-07-21
+
+### Fixed — Bug 修复
+
+- **`cli/promptfoo_ab.py`**：`is_safe_to_upgrade` 改为委托 `compute_verdict`（含 tolerance），`generate_ab_report` 接受 `tolerance` 参数。修复 `0 < rate_diff ≤ tolerance` 时报告写"✅ 安全升级"但 verdict / Langfuse label 为 🟰 的残留矛盾；同步修正"无净改善"过时文案。
+- **`common/ab_verdict.py`**：docstring 对齐回归优先口径（此前仍写旧净改善描述）。
+- **`pyproject.toml`**：版本号 bump 至 2.1.1（此前 CHANGELOG 已记但漏改）。
+- **`AGENTS.md`**：升级判定策略行改为回归优先口径；CLI 清单补齐至 12 条（补 `eval-dataset-promote`、`eval-migrate-datasets-v2`）。
+
+- **`cli/dspy_pipeline.py`**：agent 名推断优先使用 `output.prompt_name`，并在没有 prompt_name 时剥离 `{agent}-golden` / `{agent}-regression` / `{agent}-online-temp` 后缀。修复三层 dataset 架构下把 `intention-golden` 误当成本地目录，导致 A/B 阶段查找 `agents/intention-golden/promptfooconfig.yaml` 失败的问题。
+- **`cli/promptfoo_ab.py` / `cli/dspy_pipeline.py`**：统一 A/B 决策口径为“有回归一律阻断”。修复 `verdict=A/B ❌` 但报告和流水线终端仍按旧净改善口径提示“安全升级”的矛盾。
+- **`common/dataset_run_cache.py` / `cli/promptfoo_ab.py`**：缓存命中后 score 查询增加 traceId 回退；仍缺 score 的 cache hit 会降级为 miss 重新实跑，避免历史 score 未索引或复用 trace 时被当成失败，导致 A/B 通过率被大量低估。
+
+### 测试
+
+- 新增 `tests/test_dspy_pipeline.py` 覆盖 prompt_name 优先级、三层 dataset 后缀剥离和 legacy dataset 兜底。
+- 新增回归优先门禁用例，覆盖“通过率提升但存在 PASS→FAIL 回归”时不得提示安全升级。
+- 新增缓存 score 回退和 scoreless hit 降级测试。
+
+---
+
 ## [2.1.0] - 2026-05-11
 
 评估状态归档机制重构：从 Prompt label 滥用迁移到 Langfuse Dataset Run + 三态枚举。

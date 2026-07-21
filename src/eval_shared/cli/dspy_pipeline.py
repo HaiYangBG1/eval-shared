@@ -55,14 +55,17 @@ def _find_latest_report(dataset: str) -> Path | None:
 
 def _extract_agent_from_config(config: dict) -> str:
     """从 DSPy 配置中推断 agent 名称。"""
-    # 优先用 dataset 名（大多数情况与 agent 名一致）
-    dataset = config.get("dataset", "")
-    if dataset:
-        return dataset
-    # fallback: 从 prompt_name 推断
+    # 三层 dataset 架构下 dataset 通常是 `{agent}-golden`，而本地目录、
+    # prompt 名和 promote 命令仍使用真实 agent 名。
     prompt_name = config.get("output", {}).get("prompt_name", "")
     if prompt_name.endswith("-prompt"):
         return prompt_name[:-7]
+    dataset = config.get("dataset", "")
+    if dataset:
+        for suffix in ("-online-temp", "-regression", "-golden"):
+            if dataset.endswith(suffix):
+                return dataset[: -len(suffix)]
+        return dataset
     return ""
 
 
@@ -170,26 +173,26 @@ def _generate_pipeline_report(
         has_regression = "🔴 回归" in ab_text
         safe_upgrade = "✅ **安全升级**" in ab_text
 
-        if safe_upgrade:
-            delta = dspy_report.get("delta", 0)
-            lines.extend([
-                "### ✅ 建议：执行升级",
-                "",
-                f"DSPy 优化产生了 {delta:+.2%} 的提升，"
-                "且 PromptFoo A/B 对比满足净改善策略。",
-                "",
-                "执行以下命令完成升级：",
-                "```bash",
-                f"npm run promote -- --agent {agent}",
-                "```",
-                "",
-            ])
-        elif has_regression:
+        if has_regression:
             lines.extend([
                 "### ⚠️ 建议：暂缓升级",
                 "",
                 "DSPy 优化显示正向提升，但 PromptFoo 回归测试发现回归用例。",
                 "建议排查回归原因后再决定是否升级。",
+                "",
+            ])
+        elif safe_upgrade:
+            delta = dspy_report.get("delta", 0)
+            lines.extend([
+                "### ✅ 建议：执行升级",
+                "",
+                f"DSPy 优化产生了 {delta:+.2%} 的提升，"
+                "且 PromptFoo A/B 对比无回归、通过率提升。",
+                "",
+                "执行以下命令完成升级：",
+                "```bash",
+                f"npm run promote -- --agent {agent}",
+                "```",
                 "",
             ])
         else:
@@ -362,10 +365,10 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
     # 终端最终建议
     if Path(ab_report_path).exists():
         ab_text = Path(ab_report_path).read_text("utf-8")
-        if "✅ **安全升级**" in ab_text:
-            click.echo(f"\n🎉 建议升级！执行: npm run promote -- --agent {agent}")
-        elif "🔴 回归" in ab_text:
+        if "🔴 回归" in ab_text:
             click.echo("\n⚠️  存在回归用例，建议排查后再决定。详见报告。")
+        elif "✅ **安全升级**" in ab_text:
+            click.echo(f"\n🎉 建议升级！执行: npm run promote -- --agent {agent}")
         else:
             click.echo("\n🤔 请查看报告做最终决策。")
     click.echo("")

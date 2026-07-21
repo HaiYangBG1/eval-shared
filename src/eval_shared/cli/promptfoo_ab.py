@@ -223,6 +223,40 @@ def _merge_hit_and_miss(
     return results, item_id_to_trace
 
 
+def _downgrade_scoreless_hits_to_miss(
+    cache_result: CacheLookupResult,
+    hit_scores: dict[str, float],
+    *,
+    role: str,
+) -> CacheLookupResult:
+    """把缺少 score 的 cache hit 降级成 miss，避免本地统计误判。
+
+    命中 cache 只说明能复用 traceId；如果 score 还没被 Langfuse 索引到，
+    本轮必须重跑这些 case，否则 `_merge_hit_and_miss` 会保守按 fail 处理，
+    造成通过率被大量低估。
+    """
+    scoreless = [
+        item_id
+        for item_id, trace_id in cache_result.hits.items()
+        if trace_id not in hit_scores
+    ]
+    if not scoreless:
+        return cache_result
+
+    click.echo(
+        f"  ⚠️ {role} cache hit 中 {len(scoreless)} 条缺少 score，降级为 miss 重跑"
+    )
+    return CacheLookupResult(
+        hits={
+            item_id: trace_id
+            for item_id, trace_id in cache_result.hits.items()
+            if item_id not in set(scoreless)
+        },
+        miss_item_ids=[*cache_result.miss_item_ids, *scoreless],
+        source_run_names=cache_result.source_run_names,
+    )
+
+
 def _build_run_metadata(
     *,
     role: str,
@@ -426,16 +460,21 @@ def is_safe_to_upgrade(
     cand_stats: dict,
     regressions: list[dict],
     improvements: list[dict],
+    tolerance: float = 0.0,
 ) -> bool:
-    """净改善策略：改善数必须多于回归数，且候选通过率不低于基线。
+    """升级门禁：等价于 `compute_verdict == BETTER`（无回归、有改善、提升 > tolerance）。
 
-    保留作为简单布尔接口（旧调用方 / 报告中"是否安全升级"判断）；
-    新代码应优先使用 `compute_verdict` 直接拿三态 verdict。
+    保留作为简单布尔接口（旧调用方 / 报告中"是否安全升级"判断），
+    内部委托 `compute_verdict`，保证报告结论与三态 verdict / Langfuse label 永远一致。
     """
-    return (
-        len(improvements) > len(regressions)
-        and float(cand_stats["rate"]) >= float(base_stats["rate"])
+    rate_diff = float(cand_stats["rate"]) - float(base_stats["rate"])
+    verdict = compute_verdict(
+        rate_diff=rate_diff,
+        regressions=len(regressions),
+        improvements=len(improvements),
+        tolerance=tolerance,
     )
+    return verdict == ABVerdict.BETTER
 
 
 # ── 报告生成 ──
@@ -451,12 +490,15 @@ def generate_ab_report(
     improvements: list[dict],
     baseline_path: str,
     candidate_path: str,
+    tolerance: float = 0.0,
 ) -> str:
     """生成 A/B 对比报告（Markdown）。"""
     rate_diff = float(cand_stats["rate"]) - float(base_stats["rate"])
     rate_emoji = "📈" if rate_diff > 0 else ("📉" if rate_diff < 0 else "➡️")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    safe = is_safe_to_upgrade(base_stats, cand_stats, regressions, improvements)
+    safe = is_safe_to_upgrade(
+        base_stats, cand_stats, regressions, improvements, tolerance=tolerance
+    )
 
     lines = [
         f"# 📊 PromptFoo A/B 对比报告 — {agent}",
@@ -519,16 +561,17 @@ def generate_ab_report(
     lines.extend(["## 结论", ""])
     if safe:
         lines.append(
-            f"✅ **安全升级**：改善 {len(improvements)} > 回归 {len(regressions)}，"
-            f"且通过率未下降。建议执行 `npm run promote -- --agent {agent}`。"
+            f"✅ **安全升级**：无回归，改善 {len(improvements)} 个，"
+            "且通过率未下降。建议执行 "
+            f"`npm run promote -- --agent {agent}`。"
         )
     elif regressions:
         lines.append(
             f"⚠️ **存在回归**：{len(regressions)} 个用例从 PASS → FAIL，建议排查后再决定。"
         )
-    elif rate_diff >= 0:
+    elif rate_diff >= -tolerance:
         lines.append(
-            "➡️ **无净改善**：未发现回归，但改善数未超过回归数，不建议自动升级。"
+            "➡️ **无明显改善**：未发现回归，但无改善用例或变化未超过容忍阈值，不建议自动升级。"
         )
     else:
         lines.append(
@@ -698,6 +741,13 @@ def main(
             source_run_names=cand_cache.source_run_names,
         )
 
+        base_cache = _downgrade_scoreless_hits_to_miss(
+            base_cache, base_hit_scores, role="Baseline"
+        )
+        cand_cache = _downgrade_scoreless_hits_to_miss(
+            cand_cache, cand_hit_scores, role="Candidate"
+        )
+
         # ━━━ Step 3: 跑 PromptFoo subset（只跑 miss）━━━
         click.echo(f"\n━━━ Step 3/5: Baseline ({baseline_label}) miss-only 跑 ━━━")
         base_miss_results = _run_promptfoo_subset(
@@ -814,6 +864,7 @@ def main(
         agent, baseline_label, candidate_label,
         base_stats, cand_stats, regressions, improvements,
         baseline_output, candidate_output,
+        tolerance=tolerance,
     )
 
     report_path = f"{output_dir}/{agent}-ab-report.md"
@@ -835,7 +886,7 @@ def main(
         "tolerance": tolerance,
         "verdict": verdict.value,
         "safe_to_upgrade": is_safe_to_upgrade(
-            base_stats, cand_stats, regressions, improvements
+            base_stats, cand_stats, regressions, improvements, tolerance=tolerance
         ),
         "cache": {
             "baseline_hits": base_cache.hit_count,
@@ -878,7 +929,7 @@ def main(
 
     if verdict == ABVerdict.BETTER:
         click.echo(
-            f"\n✅ {verdict.value}（改善 {len(improvements)} > 回归 {len(regressions)}，"
+            f"\n✅ {verdict.value}（无回归，改善 {len(improvements)} 个，"
             f"通过率提升 {rate_diff_value:+.1f}% > 阈值 {tolerance:.1f}%）："
             f"建议执行 npm run promote -- --agent {agent}"
         )

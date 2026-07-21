@@ -396,8 +396,11 @@ eval-dspy-pipeline --config agents/intention/dspy-optimize.yaml --dry-run
 3. **Phase 3**: 生成统一决策报告（`output/{agent}-pipeline-report.md`）
 4. **Phase 4**: 自动标注 Langfuse Prompt 为三态枚举之一：`A/B ✅` / `A/B ❌` / `A/B 🟰`
 
+> Agent 名优先从 `output.prompt_name` 推断（如 `intention-prompt` → `intention`）。
+> `dataset` 可以继续使用三层命名（如 `intention-golden`），不会被误当成本地 `agents/` 目录名。
+
 > **三态判定（v2.1.0+）**：
-> - ✅ BETTER：`safe_to_upgrade=true`（净改善 + 通过率提升超过 tolerance）
+> - ✅ BETTER：无回归 + 有改善 + 通过率提升超过 tolerance
 > - ❌ WORSE：有回归 或 通过率下降超过 tolerance
 > - 🟰 SAME：变化在 ±tolerance 内（默认 1.0%），或 DSPy 优化跳过 A/B
 >
