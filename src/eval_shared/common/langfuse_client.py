@@ -29,9 +29,13 @@ class LangfuseClient:
             self._client = http_client
             self._owns_client = False
         else:
+            # ssl_verify=False 用于自签/IP 证书的私有部署；http→https 强制跳转
+            # 不能靠 follow_redirects 解决（302 会把 POST 降级为 GET），
+            # base_url 必须直接写 https。
             self._client = httpx.Client(
                 headers={"Authorization": f"Basic {self.auth_header}"},
                 timeout=30.0,
+                verify=config.get("ssl_verify", True),
             )
             self._owns_client = True
 

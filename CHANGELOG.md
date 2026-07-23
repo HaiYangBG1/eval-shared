@@ -12,6 +12,15 @@
 
 ---
 
+## [2.1.2] - 2026-07-23
+
+### Fixed — Bug 修复
+
+- **`common/config.py` / `common/langfuse_client.py`**：新增 `LANGFUSE_SSL_VERIFY=false` 支持（自签/IP 证书的私有部署）。修复 Langfuse 服务端强制 https 后 CLI 全线不可用的问题：http 请求被 302 跳转（POST 会被降级为 GET，不能靠 follow_redirects 解决），https 直连又因 IP 证书校验失败。`.env` 需将 URL 改为 `https://` 并设 `LANGFUSE_SSL_VERIFY=false`。该故障是线上评估 6 月起停摆的直接原因。
+- **`templates/.env.example`**：补 `LANGFUSE_SSL_VERIFY` 说明。
+
+---
+
 ## [2.1.1] - 2026-07-21
 
 ### Fixed — Bug 修复

@@ -51,6 +51,7 @@ def get_langfuse_config() -> dict:
             "public_key": str,
             "secret_key": str,
             "auth_header": str,   # Base64 Basic auth
+            "ssl_verify": bool,   # LANGFUSE_SSL_VERIFY=false 时为 False（自签/IP 证书场景）
         }
     """
     import base64
@@ -60,6 +61,9 @@ def get_langfuse_config() -> dict:
         or os.environ.get("LANGFUSE_BASE_URL")
         or ""
     ).rstrip("/")
+    ssl_verify = os.environ.get("LANGFUSE_SSL_VERIFY", "true").strip().lower() not in (
+        "false", "0", "no",
+    )
 
     if not base_url:
         print("❌ 缺少环境变量：LANGFUSE_HOST 或 LANGFUSE_BASE_URL", file=sys.stderr)
@@ -76,6 +80,7 @@ def get_langfuse_config() -> dict:
         "public_key": public_key,
         "secret_key": secret_key,
         "auth_header": auth_header,
+        "ssl_verify": ssl_verify,
     }
 
 
