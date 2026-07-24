@@ -11,7 +11,7 @@
 #   配置 .env 中的 DSPY_LM_* 和 LANGFUSE_* 变量
 
 # ═══ 数据来源 ═══
-dataset: intention              # Langfuse Dataset 名称
+dataset: intention-golden       # Langfuse Dataset 名称（三层架构：{agent}-golden / -regression / -online-temp）
 source: langfuse                # langfuse 或 json
 # json_path: output/intention_dspy.json  # source=json 时使用
 
