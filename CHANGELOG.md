@@ -12,6 +12,15 @@
 
 ---
 
+## [2.1.3] - 2026-07-24
+
+### Added — 新增
+
+- **LICENSE**：补 MIT 许可证。仓库在 GitHub 已是公开状态（github.com/HaiYangBG1/eval-shared），此前无任何许可证声明，第三方法律上无权复用；2026-07-24 用户拍板保持公开并采用 MIT。
+- **`pyproject.toml`**：补发布元数据 `readme` / `license` / `authors` / `classifiers` / `[project.urls]`（Homepage / Repository / Changelog）。
+
+---
+
 ## [2.1.2] - 2026-07-23
 
 ### Fixed — Bug 修复
