@@ -1,6 +1,6 @@
 [project]
 name = "eval-shared"
-version = "2.1.3"
+version = "2.2.0"
 description = "AI 评估共享工具包 — Langfuse CLI + PromptFoo Rubrics + DSPy 优化"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,7 +38,6 @@ eval-promptfoo-ab = "eval_shared.cli.promptfoo_ab:main"
 eval-dspy-optimize = "eval_shared.dspy.optimize:main"
 eval-dspy-pipeline = "eval_shared.cli.dspy_pipeline:main"
 eval-dataset-promote = "eval_shared.cli.dataset_promote:main"
-eval-migrate-datasets-v2 = "eval_shared.cli.migrate_datasets_v2:main"
 
 [build-system]
 requires = ["hatchling"]

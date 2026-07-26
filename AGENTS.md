@@ -20,7 +20,9 @@ templates/           # 业务项目脚手架：promptfooconfig / redteam / dspy-
 tests/               # pytest 测试
 ```
 
-CLI 入口在 `pyproject.toml [project.scripts]`（12 条）：`eval-sync-dataset`、`eval-sync-prompt`、`eval-online`、`eval-export-dspy`、`eval-promote`、`eval-report`、`eval-compare`、`eval-promptfoo-ab`、`eval-dspy-optimize`、`eval-dspy-pipeline`、`eval-dataset-promote`、`eval-migrate-datasets-v2`。
+CLI 入口在 `pyproject.toml [project.scripts]`（11 条）：`eval-sync-dataset`、`eval-sync-prompt`、`eval-online`、`eval-export-dspy`、`eval-promote`、`eval-report`、`eval-compare`、`eval-promptfoo-ab`、`eval-dspy-optimize`、`eval-dspy-pipeline`、`eval-dataset-promote`。
+
+> **一次性运维不再新写 CLI 模块**（v2.2.0 起，`eval-migrate-datasets-v2` 已退役示范）：临时查询 / 清理 / 探针类操作改用官方 `npx langfuse-cli api <resource> <action>`（自托管实例需 `LANGFUSE_HOST` 指向实例地址；证书自签时需 `NODE_TLS_REJECT_UNAUTHORIZED=0`，安全账同 `LANGFUSE_SSL_VERIFY`）。**边界**：langfuse-cli 只许查询/一次性运维；prompt / dataset 的常规写操作一律走本仓 `eval-sync-*` / `eval-promote` / `eval-dataset-promote`（命名约定、标签流、幂等 ID 只在这里实现）。
 
 ## 环境与运行
 

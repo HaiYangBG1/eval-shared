@@ -12,6 +12,15 @@
 
 ---
 
+## [2.2.0] - 2026-07-26
+
+### Removed
+- **退役一次性工具**（2026-07 现状评估 P3 预登记，用户 07-26 拍板）：
+  - `eval-migrate-datasets-v2` CLI（`cli/migrate_datasets_v2.py` + `test_migrate_datasets_v2.py`）——三层 dataset 迁移已于 2026-05-11 执行完毕，07-24 Langfuse 全量重建后旧 `{agent}` dataset 已不存在，工具失去作用对象
+  - `tests/spike_ingestion_dataset_run.py` 探针脚本（结论已沉淀在 `docs/dataset-run-migration.md` 与 eval-ai-order `known-issues.md`）
+  - CLI 清单 12 → 11 条，契约 `PROTOCOL.md` 同步修订
+- 后续一次性运维（临时查询/清理/探针）改用官方 `langfuse-cli`，不再新写 CLI 模块；边界见 `AGENTS.md`（langfuse-cli 只读/一次性，常规写操作仍走 `eval-sync-*` / promote）
+
 ## [2.1.3] - 2026-07-24
 
 ### Added — 新增

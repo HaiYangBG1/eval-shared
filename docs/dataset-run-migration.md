@@ -2,6 +2,7 @@
 
 > 工作日志。每次改动的大纲、问题、坑都追加到这里。
 > 完成后归档到 `BUGFIXES.md` 或 `CHANGELOG.md`。
+> ⚠️ 历史文档：`eval-migrate-datasets-v2` 与 `tests/spike_ingestion_dataset_run.py` 已于 v2.2.0（2026-07-26）退役删除，代码见 git 历史；此类一次性运维改用 `langfuse-cli`（见 AGENTS.md）。
 
 ## 背景与目标
 

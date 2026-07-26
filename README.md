@@ -344,20 +344,6 @@ eval-promptfoo-ab --agent intention --tolerance 2.0
 
 Langfuse 写入：每跑一次创建 2 个 Dataset Run（baseline + candidate），命名 `ab-{role}__{prompt_name}__v{version}__judge-{judge}__{ts}`，cache 命中的 case 复用历史 trace_id，省 LLM 调用。
 
-### `eval-migrate-datasets-v2` — 一次性迁移到三层 dataset 架构
-
-把旧的 `{agent}` dataset 迁移到 `{agent}-golden` + 建空的 `{agent}-regression` / `{agent}-online-temp`。
-
-```bash
-eval-migrate-datasets-v2 --agent intention --dry-run    # 看会做什么
-eval-migrate-datasets-v2 --all                          # 全部 agent 一次性迁移
-eval-migrate-datasets-v2 --agent intention --from-name legacy-intent  # 源名不同时覆盖
-```
-
-- 旧 dataset **不删除**，留作只读备份
-- item.id 用 `compute_item_id(new_dataset, vars)` 复算，保证后续 sync_dataset push 幂等
-- metadata 加 `migrated_from / migrated_at` 审计字段
-
 ### `eval-dataset-promote` — online-temp 转入 golden / regression
 
 把 eval-online 收集到 online-temp 的某条有价值用例（如新发现的 edge case）promote 到长期数据集。

@@ -1,7 +1,7 @@
 """
 eval-sync-dataset — Langfuse Dataset ↔ 本地 YAML 双向同步。
 
-三层 dataset 架构（与 eval-migrate-datasets-v2 / eval-dataset-promote 对齐）：
+三层 dataset 架构（与 eval-dataset-promote 对齐）：
   - golden       → 当前能力基线，A/B 主战场
   - regression   → 历史 bug 沉淀，CI 必跑
   - online-temp  → eval-online 工作区（覆盖式，一般不需要 push）
