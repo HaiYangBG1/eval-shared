@@ -164,10 +164,12 @@ def main(
                 "promoted_reason": reason,
             }
 
-            # 用 sync_dataset 同一算法计算目标 id，让后续 sync 幂等
+            # 用 sync_dataset 同一算法计算目标 id，让后续 sync/重复 promote 幂等。
+            # list 型 input（Dify obs 的 messages 数组）也必须算 id，
+            # 否则 id=None 时 Langfuse 每次分配随机 id，重复 promote 产生重复 item（#17）
             target_item_id = (
                 compute_item_id(target, src_input)
-                if isinstance(src_input, dict)
+                if isinstance(src_input, (dict, list))
                 else None
             )
 

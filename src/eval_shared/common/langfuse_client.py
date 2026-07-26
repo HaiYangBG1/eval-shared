@@ -301,11 +301,28 @@ class LangfuseClient:
         r.raise_for_status()
         return r.json()
 
+    def list_prompt_meta(self, name: str) -> dict:
+        """列出 prompt 元信息（含 versions 版本号列表）。
+
+        GET /api/public/v2/prompts?name= 返回 PromptMeta；找不到返回空 dict。
+        """
+        r = self._client.get(
+            f"{self.base_url}/api/public/v2/prompts",
+            params={"name": name},
+        )
+        r.raise_for_status()
+        for item in r.json().get("data", []):
+            if item.get("name") == name:
+                return item
+        return {}
+
     def update_prompt_labels(self, name: str, version: int, labels: list[str]) -> dict:
         """更新指定 prompt 版本的 labels。
 
         使用 PATCH /api/public/v2/prompts/{name}/versions/{version}
         Labels 在所有版本中唯一（同一 label 只能属于一个版本）。
+        ⚠️ `newLabels` 语义是**只增/移动、不删除**（2026-07-24 实测）：
+        把 label 加到本版本会自动从其它版本上移走，但无法从本版本上删除。
         """
         r = self._client.patch(
             f"{self.base_url}/api/public/v2/prompts/{name}/versions/{version}",

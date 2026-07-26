@@ -115,6 +115,39 @@ def test_promote_copies_item_with_promoted_metadata(monkeypatch) -> None:
     assert "promoted_at" in meta
 
 
+def test_promote_list_input_gets_stable_id(monkeypatch) -> None:
+    """#17：Dify obs 的 messages 数组（list 型 input）也必须算确定性 id。
+
+    07-23 起三节点 obs input 均为 messages 数组；若 id=None，重复 promote
+    时 Langfuse 分配随机 id → 目标数据集产生重复 item。
+    """
+    src_input = [
+        {"role": "system", "content": "你是点餐助手"},
+        {"role": "user", "content": "来一份小炒肉"},
+    ]
+    fake = FakeClient(
+        items_by_id={
+            "src-1": {"id": "src-1", "input": src_input, "metadata": {}}
+        },
+        existing_datasets={"intention-online-temp", "intention-regression"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code == 0, result.output
+    body = fake.upserted_items[0]
+    assert body["id"] == compute_item_id("intention-regression", src_input)
+    # 同一输入重算必须得到同一 id（幂等的根基）
+    assert compute_item_id("intention-regression", src_input) == compute_item_id(
+        "intention-regression", list(src_input)
+    )
+
+
 def test_promote_creates_target_dataset_if_missing(monkeypatch) -> None:
     fake = FakeClient(
         items_by_id={

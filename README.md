@@ -198,26 +198,26 @@ cp "$TEMPLATES/redteam.template.yaml" agents/intent-agent/redteam.yaml
 
 ### Step 6：配置 `package.json` 脚本
 
+推荐通过一个桥接脚本调用 eval-shared（相邻目录以 `python -m` 方式，**不依赖 PATH 中的 `eval-*` 命令**——契约见 `contracts/PROTOCOL.md` 边界A；实现可参考 `eval-ai-order/scripts/eval-shared.js`）：
+
 ```json
 {
   "scripts": {
     "test": "promptfoo eval",
     "test:agent": "promptfoo eval -c agents/$AGENT/promptfooconfig.yaml",
-    "test:all": "for dir in agents/*/; do promptfoo eval -c ${dir}promptfooconfig.yaml; done",
     "view": "promptfoo view",
-    "sync:dataset": "eval-sync-dataset",
-    "sync:prompt": "eval-sync-prompt",
-    "export:dspy": "eval-export-dspy",
-    "promote": "eval-promote",
+    "sync:dataset": "node scripts/eval-shared.js sync-dataset",
+    "sync:prompt": "node scripts/eval-shared.js sync-prompt",
+    "export:dspy": "node scripts/eval-shared.js export-dspy",
+    "promote": "node scripts/eval-shared.js promote",
     "cache:clear": "promptfoo cache clear",
-    "dspy:optimize": "eval-dspy-pipeline --config",
-    "dspy:optimize:skip": "eval-dspy-pipeline --skip-optimize --config",
-    "promptfoo:ab": "eval-promptfoo-ab"
+    "dspy:optimize": "node scripts/eval-shared.js dspy-pipeline --config",
+    "promptfoo:ab": "node scripts/eval-shared.js promptfoo-ab"
   }
 }
 ```
 
-> eval-shared 的 CLI 命令通过 pip 安装后注册到 PATH，npm scripts 直接调用即可。
+> 桥接脚本把子命令映射到 `python -m eval_shared.cli.<模块>` 并指向相邻的 `../eval-shared`。直接调 PATH 中的 `eval-*` 命令仅适合本机单仓调试，多仓/CI 环境会因 PATH 差异漂移。
 
 ### Step 7：准备测试数据 & 运行
 

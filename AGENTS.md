@@ -78,8 +78,8 @@ eval-sync-dataset --agent <agent> --direction pull
 - `get_scores` 增量评估传 `from_timestamp`（映射 Langfuse `fromTimestamp` 参数），不要客户端过滤全表（#13）
 
 **promote_prompt**
-- 标签管理用**保留白名单反向剥离**（`{"latest", "production", "staging"}`），不要黑名单——会把 `A/B ✅` 等审计标签一并清掉（#2）
-- ⚠️ **已知失效**：Langfuse `PATCH …/versions/{v}` 的 `newLabels` 语义是**只增/移动、不删除**（2026-07-24 实测），所以上一条的"剥离"实际不生效——promote 后旧 A/B 标签仍留在版本上，删标签只能在 Langfuse UI 手动做。修复思路：promote 时把 A/B 标签"移动"到一个 graveyard 版本，或等 Langfuse 提供删除 API
+- Langfuse `PATCH …/versions/{v}` 的 `newLabels` 语义是**只增/移动、不删除**（2026-07-24 实测）——不要再写"传过滤后列表来剥离标签"的代码，那是静默无效的（2026-07-26 已修）
+- 剥离 A/B 状态标签走 **graveyard 移动方案**（2026-07-26 落地）：promote 后回读 production 落点校验，再把残留 A/B 标签移到最老的非本版本；只有一个版本时显式告警。staging 标签无法删除，留待下次 sync push 自然移走。测试 fake 必须还原"只增/移动"语义，否则会对剥离生效产生假阳性（旧测试的教训）
 - A/B ❌ 阻断门 + `--force` 兜底是配套的，改一个要同时改另一个（#14、#15）
 
 **promptfoo_ab**

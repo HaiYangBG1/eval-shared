@@ -10,11 +10,12 @@ import hashlib
 import json
 
 
-def compute_item_id(dataset_name: str, vars_data: dict) -> str:
+def compute_item_id(dataset_name: str, vars_data: dict | list) -> str:
     """生成稳定的 dataset item id：`{dataset_name}-{sha1(sorted_json(vars))[:10]}`。
 
-    `sort_keys=True` 保证字典序无关；只对 `vars` hash，不含 `assert`/`metadata`，
-    所以同一组输入即便后续断言变化仍是同一个 item id。
+    `sort_keys=True` 保证字典序无关（含 list 内嵌套 dict）；只对 `vars` hash，
+    不含 `assert`/`metadata`，所以同一组输入即便后续断言变化仍是同一个 item id。
+    list 型输入（如 Dify obs 的 messages 数组）同样得到确定性 id（#17）。
     """
     id_hash = hashlib.sha1(
         json.dumps(vars_data, sort_keys=True).encode()

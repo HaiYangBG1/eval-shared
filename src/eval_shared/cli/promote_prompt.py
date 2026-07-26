@@ -8,7 +8,15 @@ A/B 门禁（基于 ABVerdict 三态枚举）：
   ✅ A/B ✅ → 放行
   ⚠️ A/B 🟰 → 警告但放行（候选与基线相当，不阻塞 promote）
   ❌ A/B ❌ → 阻断；--force 可绕过
-  promote 时 production 版本上不保留任何 A/B 评估状态 label
+
+标签剥离（graveyard 方案，#10/#21）：
+  Langfuse `newLabels` 只增/移动、不删除，无法直接从版本上摘标签。
+  promote 后回读校验 production 落点，再把残留的 A/B 评估状态标签
+  "移动"到最老的非本版本（graveyard），使 production 版本不带评估状态。
+  staging 标签无法删除，留在原版本，下次 sync push 时被自然移走。
+  注意：graveyard 取「最老的非本版本」——若不存在更老版本，标签会落到更新的
+  版本上；该版本日后若成为 staging 且带 `A/B ❌`，会触发 promote 阻断门
+  （属预期保守行为，确认无误可 --force）。
 """
 
 from __future__ import annotations
@@ -19,11 +27,6 @@ import httpx
 from eval_shared.common.ab_verdict import AB_VERDICT_LABELS, ABVerdict
 from eval_shared.common.config import init_env
 from eval_shared.common.langfuse_client import LangfuseClient
-
-
-# latest 由 Langfuse 系统管理；staging/production 是流程语义上互斥的标签，
-# promote 时统一从原 labels 中剔除，再追加 production。
-_RESERVED_LABELS = {"latest", "production", "staging"}
 
 
 def _is_ab_state_label(label: str) -> bool:
@@ -93,15 +96,10 @@ def main(agent: str, dry_run: bool, force: bool):
             click.echo("✅ Dry-run 完成，以上版本将被标记为 production。")
             return
 
-        # 剥离全部保留 label + 全部 A/B 评估状态 label，让 production 版本只带流程标签
-        labels = [
-            lb for lb in existing_labels
-            if lb not in _RESERVED_LABELS and not _is_ab_state_label(lb)
-        ]
-        labels.append("production")
-
+        # newLabels 语义 = 只增/移动、不删除（踩坑记录见 AGENTS.md），
+        # 因此这里只追加 production；A/B 状态标签靠下面的 graveyard 移动剥离。
         try:
-            client.update_prompt_labels(prompt_name, version, labels)
+            client.update_prompt_labels(prompt_name, version, ["production"])
         except httpx.HTTPStatusError as e:
             body = e.response.text[:300] if e.response else ""
             raise click.ClickException(
@@ -109,7 +107,55 @@ def main(agent: str, dry_run: bool, force: bool):
                 f"{f' — {body}' if body else ''}"
             )
 
-        click.echo(f"✅ 已将 {prompt_name} v{version} 标记为 production")
+        # 回读校验（#21）：不信任 PATCH 返回值，读 production 实际落点
+        try:
+            check = client.get_prompt(prompt_name, label="production")
+        except httpx.HTTPStatusError as e:
+            raise click.ClickException(
+                f"promote 后回读 production 失败：{e.response.status_code}"
+            )
+        if check.get("version") != version:
+            raise click.ClickException(
+                f"回读校验失败：production 实际在 v{check.get('version')}，"
+                f"预期 v{version}——请在 Langfuse UI 核查"
+            )
+
+        # graveyard 移动（#10）：把残留的 A/B 评估状态标签移到最老的非本版本上
+        stale = [lb for lb in check.get("labels", []) if _is_ab_state_label(lb)]
+        if stale:
+            meta = client.list_prompt_meta(prompt_name)
+            other_versions = sorted(
+                v for v in meta.get("versions", []) if v != version
+            )
+            if not other_versions:
+                click.echo(
+                    f"⚠️ 无其他版本可作 graveyard，A/B 标签 {stale} 仍留在 v{version}"
+                    "（Langfuse 无删除标签 API，请 UI 手动清理）",
+                    err=True,
+                )
+            else:
+                graveyard = other_versions[0]
+                client.update_prompt_labels(prompt_name, graveyard, stale)
+                recheck = client.get_prompt(prompt_name, label="production")
+                still = [lb for lb in recheck.get("labels", []) if _is_ab_state_label(lb)]
+                if still:
+                    click.echo(
+                        f"❌ A/B 标签剥离失败，production 版本仍带 {still}"
+                        "——请在 Langfuse UI 手动清理",
+                        err=True,
+                    )
+                    raise SystemExit(1)
+                click.echo(f"🪦 A/B 状态标签 {stale} 已移至 graveyard 版本 v{graveyard}")
+
+        if "staging" in check.get("labels", []):
+            click.echo(
+                "ℹ️ staging 标签仍在本版本（Langfuse 不支持删除；"
+                "下次 sync:prompts:push 会把它移到新版本）"
+            )
+
+        click.echo(f"✅ 已将 {prompt_name} v{version} 标记为 production（回读校验通过）")
+        click.echo("⚠️ 契约提醒（PROTOCOL §2.3）：production 标签 = Dify 生产实际运行版。")
+        click.echo("   请同步 Dify 节点 prompt，并跑 `npm run sync:prompts:pull` 复核一致。")
 
 
 if __name__ == "__main__":

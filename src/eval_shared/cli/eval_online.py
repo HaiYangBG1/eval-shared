@@ -2,15 +2,23 @@
 eval-online — 拉取 Langfuse 线上 Observation → LLM-as-a-Judge 评估 → 写回 Score。
 
 解决的问题：
-  Dify 不支持 OTel 格式，Langfuse 内置的 Observation-level Evaluator 无法触发。
-  本脚本用外部批处理方式实现等效功能。
+  Langfuse 的 obs 级内置 Evaluator 只消费 OTel/OTLP 通道上报的数据，而 Dify 的
+  Langfuse 集成走经典 ingestion API（含 1.15.0 及上游 main），其 trace 永远不会
+  触发内置评估器（2026-07-26 对照实验定案，见 pm/status/验证.md）。
+  本脚本用外部批处理方式实现等效功能，是 Dify 线上数据打分的唯一管道。
 
 用法：
   eval-online [--config <path>] [--hours <n>] [--limit <n>] [--dry-run] [--force] [--verbose]
+
+水位线：
+  成功跑完（非 dry-run 且零失败）后把本次启动时间写入 cwd 下 `.eval-online-state.json`；
+  下次运行若发现上次运行点早于 --hours 窗口起点，自动把窗口扩展到上次运行点，
+  防止手动不定时运行漏评（漏跑即永久漏评）。
 """
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime, timezone, timedelta
@@ -35,6 +43,40 @@ def _online_run_name(agent: str, score_name: str, ts: datetime) -> str:
     用 `online-` 前缀区分 A/B 的 `ab-baseline/ab-candidate` 前缀。
     """
     return f"online-{agent}-{score_name}-{ts.strftime('%Y%m%dT%H%M%SZ')}"
+
+
+# ── 水位线（漏评保护）──
+
+WATERMARK_FILE = ".eval-online-state.json"
+
+
+def _load_watermark(path: Path) -> datetime | None:
+    """读取上次成功运行的启动时间；文件不存在或损坏返回 None。"""
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        ts = datetime.fromisoformat(data["last_run_utc"])
+        return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def _save_watermark(path: Path, ts: datetime) -> None:
+    path.write_text(
+        json.dumps({"last_run_utc": ts.isoformat()}, ensure_ascii=False) + "\n",
+        "utf-8",
+    )
+
+
+def _resolve_since(now: datetime, hours: int, watermark: datetime | None) -> tuple[datetime, bool]:
+    """计算拉取窗口起点。
+
+    返回 (since, gap_extended)：水位线早于 --hours 窗口起点时扩展到水位线，
+    gap_extended=True；否则用 --hours 窗口，False。
+    """
+    window_start = now - timedelta(hours=hours)
+    if watermark and watermark < window_start:
+        return watermark, True
+    return window_start, False
 
 
 # ── 字段提取 ──
@@ -102,6 +144,12 @@ def _stringify(val: Any) -> str:
         return val
     import json
     return json.dumps(val, ensure_ascii=False)
+
+
+# 判官注入上限（字符）。评估器可用 maxChars 覆盖。
+# 2026-07-26 从 8000 提到 24000：96h 基线实测 192/412 条被 8000 截断
+# （recommend/replenish input 含全菜单），判官只看到半截数据，分数失真。
+_INJECT_MAX_CHARS = 24000
 
 
 def _truncate(s: str, length: int) -> str:
@@ -208,6 +256,13 @@ def _process_evaluator(
     observations = client.get_observations(name, since, limit)
     click.echo(f"   拉取到 {len(observations)} 条 observation")
     summary["total"] += len(observations)
+    if len(observations) >= limit:
+        click.echo(
+            f"   ⚠️ 已达 --limit 上限（{limit}），时间窗内可能还有未拉取的数据；"
+            f"通过率仅代表本批，加大 --limit 重跑可补齐",
+            err=True,
+        )
+        summary.setdefault("capped", []).append(f"{score_name}({name})")
 
     if not observations:
         return
@@ -240,10 +295,21 @@ def _process_evaluator(
             summary["skipped"] += 1
             continue
 
+        input_str = _stringify(input_val)
+        output_str = _stringify(output_val)
+        max_chars = int(evaluator.get("maxChars") or _INJECT_MAX_CHARS)
+        if len(input_str) > max_chars or len(output_str) > max_chars:
+            summary["truncated"] += 1
+            if verbose:
+                click.echo(
+                    f"   ⚠️ 注入内容超 {max_chars} 字符被截尾"
+                    f"（input {len(input_str)} / output {len(output_str)}）: {obs['id']}",
+                    err=True,
+                )
         prompt = rubric.replace(
-            "{{input}}", _truncate(_stringify(input_val), 8000)
+            "{{input}}", _truncate(input_str, max_chars)
         ).replace(
-            "{{output}}", _truncate(_stringify(output_val), 8000)
+            "{{output}}", _truncate(output_str, max_chars)
         )
 
         try:
@@ -388,20 +454,36 @@ def main(config_path: str, hours: int, limit: int, dry_run: bool, force: bool, v
 
     langfuse_cfg = get_langfuse_config()
     eval_cfg = get_eval_model_config()
-    since = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+    run_started = datetime.now(timezone.utc)
+    watermark_path = Path.cwd() / WATERMARK_FILE
+    watermark = _load_watermark(watermark_path)
+    since_dt, gap_extended = _resolve_since(run_started, hours, watermark)
+    since = since_dt.isoformat()
 
     click.echo("╔══════════════════════════════════════════════════╗")
     click.echo("║           eval-online · 线上评估批处理            ║")
     click.echo("╚══════════════════════════════════════════════════╝")
     click.echo(f"  Langfuse  : {langfuse_cfg['base_url']}")
     click.echo(f"  评估模型  : {eval_cfg['model_name']} @ {eval_cfg['base_url']}")
-    click.echo(f"  时间范围  : 最近 {hours} 小时 (since {since})")
+    if gap_extended:
+        gap_days = (run_started - watermark).total_seconds() / 86400
+        click.echo(
+            f"  ⏰ 水位线  : 上次运行 {watermark.isoformat()}（{gap_days:.1f} 天前），"
+            f"时间窗自动扩展覆盖间隔"
+        )
+        click.echo(f"  时间范围  : since {since}（水位线扩展，原 --hours {hours}）")
+    else:
+        click.echo(f"  时间范围  : 最近 {hours} 小时 (since {since})")
     click.echo(f"  每名称上限: {limit} 条")
     click.echo(f"  模式      : {'🧪 DRY-RUN（不写回）' if dry_run else '🚀 正式写回'}")
     click.echo(f"  评估器数量: {len(config['evaluators'])}")
     click.echo("")
 
-    summary = {"total": 0, "scored": 0, "skipped": 0, "errors": 0, "written": 0, "runs": []}
+    summary = {
+        "total": 0, "scored": 0, "skipped": 0, "errors": 0, "written": 0,
+        "truncated": 0, "capped": [], "runs": [],
+    }
 
     with LangfuseClient(langfuse_cfg) as client:
         # 跑前清空所有 agent 的 online-temp dataset（覆盖式策略，按用户约定）
@@ -436,6 +518,10 @@ def main(config_path: str, hours: int, limit: int, dry_run: bool, force: bool, v
     click.echo(f"  本次评估         : {summary['scored']}")
     click.echo(f"  写回 Langfuse    : {summary['written']}")
     click.echo(f"  评估失败         : {summary['errors']}")
+    if summary["truncated"]:
+        click.echo(f"  ⚠️ 截尾注入      : {summary['truncated']} 条（超 8000 字符，评分可能失真）")
+    if summary["capped"]:
+        click.echo(f"  ⚠️ 达 limit 上限 : {', '.join(summary['capped'])}（本批不完整）")
 
     runs = summary.get("runs") or []
     if runs:
@@ -447,7 +533,21 @@ def main(config_path: str, hours: int, limit: int, dry_run: bool, force: bool, v
     click.echo("")
 
     if summary["errors"] > 0:
+        click.echo("  ⚠️ 存在评估失败，水位线不推进（下次运行会重试失败窗口）", err=True)
         raise SystemExit(1)
+
+    if dry_run:
+        click.echo("  🧪 dry-run，水位线不推进")
+    elif summary["capped"]:
+        # 达 limit 上限=本批不完整；推进水位线会让缺口永久漏评（水位线扩窗
+        # 恰是最容易达上限的场景），所以不推进，加大 --limit 重跑补齐后再推进
+        click.echo(
+            "  ⚠️ 本批达 --limit 上限不完整，水位线不推进；加大 --limit 重跑补齐后再推进",
+            err=True,
+        )
+    else:
+        _save_watermark(watermark_path, run_started)
+        click.echo(f"  💧 水位线已推进至 {run_started.isoformat()}（{WATERMARK_FILE}）")
 
 
 if __name__ == "__main__":

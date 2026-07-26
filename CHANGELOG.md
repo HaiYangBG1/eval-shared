@@ -12,6 +12,25 @@
 
 ---
 
+## [2.3.0] - 2026-07-26
+
+### Added — 新增
+
+- **`eval-online` 水位线（漏评保护，#13/#15 拍板）**：成功跑完后把启动时间写入 cwd `.eval-online-state.json`；下次运行若上次运行点早于 `--hours` 窗口起点，自动扩窗覆盖间隔。配套约定：dry-run、存在失败、或**达 `--limit` 上限（本批不完整，reviewer P1-4）**的运行均**不推进**水位线。适配「不上 cron、本地不定时手动跑」的触发方式——漏跑不再等于永久漏评。
+
+### Fixed — Bug 修复
+
+- **`eval-online` 静默截断改显式告警（#15）**：① 拉取量达 `--limit` 上限时告警"本批不完整"并入汇总（此前 42%/62% 等通过率只代表最新 50 条却无提示）；② rubric 注入超限截尾时计数并在汇总标注"评分可能失真"（verbose 模式逐条打印）。
+- **`eval-online` 判官注入上限 8000 → 24000 字符，且支持评估器级 `maxChars` 覆盖**：告警上线后 96h 基线实测 **192/412 条**被 8000 截断（recommend/replenish input 含全菜单）——判官长期只看到半截数据，是历史低通过率不可信的主因之一。
+- **`eval-promote` 标签剥离失效 + 静默假成功（#10/#21）**：Langfuse `newLabels` 只增/移动、不删除，旧"传过滤列表"写法静默无效。改为 **graveyard 移动方案**：promote 后回读 production 落点校验（不再信任 PATCH 返回值），把残留 A/B 状态标签移到最老的非本版本；仅一个版本时显式告警；剥离复核失败退出码 1。promote 成功后输出 Dify 同步契约提醒（PROTOCOL §2.3：production=Dify 实际运行版）。`langfuse_client` 新增 `list_prompt_meta`。
+- **`eval-dataset-promote` list 型 input 幂等（#17）**：`compute_item_id` 支持 list（07-23 起 Dify obs input 均为 messages 数组）；此前 id=None 时 Langfuse 分配随机 id，重复 promote 产生重复 item。
+
+### Docs — 文档
+
+- `eval_online` 模块 docstring 真因口径修正（2026-07-26 对照实验：obs 级内置评估器只消费 OTel 通道数据，Dify 走经典 ingestion——本脚本是 Dify 线上打分唯一管道）。
+- `templates/.env.example`：`LANGFUSE_SSL_VERIFY=false` 中间人风险标注（#23）。
+- `AGENTS.md` promote 踩坑更新：graveyard 方案落地记录 + 测试 fake 必须还原"只增/移动"语义的教训。
+
 ## [2.2.0] - 2026-07-26
 
 ### Removed
