@@ -12,6 +12,18 @@
 
 ---
 
+## [2.4.0] - 2026-07-28
+
+### Added
+
+- **regression 本地双写（契约 §2.3，#18 重轨提案拍板落地）**：`eval-dataset-promote --to regression` 写 Langfuse 的同时默认回写业务仓 `agents/{agent}/datasets/regression.yaml`（本地 YAML=SSOT，Langfuse 仅为运行镜像；`--no-local-write` 仅限演练）。本地条目携带 Langfuse item `id`（往返幂等锚点）+ 审计 metadata（promoted_from / promoted_from_item_id / promoted_at / promoted_reason）。`--to golden` 不自动回写，提示人工补 golden.yaml。
+- **`common/pii.py` PII 脱敏 v1**：只作用于用户话术字段（messages `role=user` 的 content、`vars.query`）——手机号/连续 ≥7 位数字→`<PHONE>`、称呼式人名→`<NAME>`、桌号/会员号→`<ID>`；菜单/输出 JSON（food_id 等业务数字）与审计 metadata 不碰。工具输出逐处 diff 供人工过目。只管入 git 执行点；Judge 链路不脱敏（2026-07-28 拍板）。
+- **`eval-sync-dataset` regression 无损往返**：pull 保留 item `id` 与审计 metadata（按 promoted_at 排序保证文件确定性、入 git 前脱敏、SSOT 文件头+覆盖警告）；push 优先使用条目自带 `id`（脱敏后 hash 漂移也能幂等覆盖）并带回审计 metadata——丢库可全量恢复。
+
+### Changed
+
+- `eval-sync-dataset` push 的 metadata 组装：条目自带 `metadata` 原样带回（source 可被覆盖），`assert`/`index` 仍以 YAML 为准；golden 链路行为不变。
+
 ## [2.3.1] - 2026-07-27
 
 ### Fixed

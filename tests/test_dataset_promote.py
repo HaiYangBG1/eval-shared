@@ -91,12 +91,14 @@ def test_promote_copies_item_with_promoted_metadata(monkeypatch) -> None:
         existing_datasets={"intention-online-temp", "intention-regression"},
     )
 
+    # --no-local-write：本测试只核 Langfuse 侧行为（本地双写见下方 §2.3 测试组）
     result = _invoke(
         monkeypatch, fake,
         "--agent", "intention",
         "--to", "regression",
         "--item-ids", "src-1",
         "--reason", "新发现的过敏咨询 edge case",
+        "--no-local-write",
     )
 
     assert result.exit_code == 0, result.output
@@ -137,6 +139,7 @@ def test_promote_list_input_gets_stable_id(monkeypatch) -> None:
         "--agent", "intention",
         "--to", "regression",
         "--item-ids", "src-1",
+        "--no-local-write",
     )
 
     assert result.exit_code == 0, result.output
@@ -161,6 +164,7 @@ def test_promote_creates_target_dataset_if_missing(monkeypatch) -> None:
         "--agent", "intention",
         "--to", "regression",
         "--item-ids", "src-1",
+        "--no-local-write",
     )
 
     assert result.exit_code == 0, result.output
@@ -241,3 +245,153 @@ def test_promote_list_mode_does_not_promote(monkeypatch) -> None:
     assert fake.upserted_items == []
     assert "intention-online-temp" in result.output
     assert "共 2 条" in result.output
+
+
+# ── 本地双写（契约 §2.3：regression 本地 YAML=SSOT，Langfuse 仅镜像）──
+
+
+from eval_shared.common.yaml_utils import load_yaml  # noqa: E402
+
+
+_MESSAGES_INPUT = [
+    {"role": "system", "content": '菜单 {"food_id":"1300000021","stock":907}'},
+    {"role": "user", "content": "订餐电话13812345678"},
+]
+
+
+def _fake_with_messages_item() -> FakeClient:
+    return FakeClient(
+        items_by_id={
+            "src-1": {
+                "id": "src-1",
+                "input": _MESSAGES_INPUT,
+                "metadata": {"source": "eval-online", "score_value": 0.0},
+            }
+        },
+        existing_datasets={"intention-online-temp", "intention-regression"},
+    )
+
+
+def _chdir_repo_root(monkeypatch, tmp_path, agent: str = "intention") -> None:
+    (tmp_path / "agents" / agent / "datasets").mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
+
+
+def test_promote_regression_writes_local_ssot_scrubbed(monkeypatch, tmp_path) -> None:
+    _chdir_repo_root(monkeypatch, tmp_path)
+    fake = _fake_with_messages_item()
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+        "--reason", "生产幻觉实锤",
+    )
+
+    assert result.exit_code == 0, result.output
+    entries = load_yaml(tmp_path / "agents" / "intention" / "datasets" / "regression.yaml")
+    assert len(entries) == 1
+    entry = entries[0]
+    # id 用未脱敏 input 复算（与 Langfuse 镜像一致，往返幂等锚点）
+    assert entry["id"] == compute_item_id("intention-regression", _MESSAGES_INPUT)
+    # 本地入 git 的用户话术已脱敏；system（菜单）不碰
+    assert entry["vars"][1]["content"] == "订餐电话<PHONE>"
+    assert "1300000021" in entry["vars"][0]["content"]
+    # 审计字段齐全（assert 不入 metadata，有独立位置）
+    meta = entry["metadata"]
+    assert meta["promoted_from"] == "intention-online-temp"
+    assert meta["promoted_reason"] == "生产幻觉实锤"
+    assert "promoted_at" in meta and "assert" not in meta
+    assert entry["assert"] == []
+    # Langfuse 镜像保持原文（Judge 链路不脱敏，2026-07-28 拍板）
+    assert fake.upserted_items[0]["input"][1]["content"] == "订餐电话13812345678"
+    assert "PII" in result.output and "<PHONE>" in result.output
+
+
+def test_promote_regression_local_merge_is_idempotent(monkeypatch, tmp_path) -> None:
+    _chdir_repo_root(monkeypatch, tmp_path)
+
+    for _ in range(2):
+        fake = _fake_with_messages_item()
+        result = _invoke(
+            monkeypatch, fake,
+            "--agent", "intention",
+            "--to", "regression",
+            "--item-ids", "src-1",
+        )
+        assert result.exit_code == 0, result.output
+
+    entries = load_yaml(tmp_path / "agents" / "intention" / "datasets" / "regression.yaml")
+    assert len(entries) == 1  # 同 id 覆盖，不追加重复条目
+
+
+def test_promote_regression_fails_fast_without_agents_dir(monkeypatch, tmp_path) -> None:
+    monkeypatch.chdir(tmp_path)  # 没有 agents/ 目录（如误在 eval-shared 根运行）
+    fake = _fake_with_messages_item()
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    # 早失败：Langfuse 一条都不该写（避免「镜像有、SSOT 没有」的半程状态）
+    assert result.exit_code != 0
+    assert fake.upserted_items == []
+    assert "no-local-write" in result.output
+
+
+def test_promote_regression_no_local_write_skips_file(monkeypatch, tmp_path) -> None:
+    _chdir_repo_root(monkeypatch, tmp_path)
+    fake = _fake_with_messages_item()
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+        "--no-local-write",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / "agents" / "intention" / "datasets" / "regression.yaml").exists()
+    assert "已关闭本地回写" in result.output
+    assert len(fake.upserted_items) == 1
+
+
+def test_promote_regression_dry_run_previews_local_write(monkeypatch, tmp_path) -> None:
+    _chdir_repo_root(monkeypatch, tmp_path)
+    fake = _fake_with_messages_item()
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+        "--dry-run",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert not (tmp_path / "agents" / "intention" / "datasets" / "regression.yaml").exists()
+    assert "DRY 本地回写" in result.output
+    assert fake.upserted_items == []
+
+
+def test_promote_golden_reminds_manual_ssot(monkeypatch, tmp_path) -> None:
+    _chdir_repo_root(monkeypatch, tmp_path)
+    fake = FakeClient(
+        items_by_id={"src-1": {"id": "src-1", "input": {"q": "a"}, "metadata": {}}},
+        existing_datasets={"intention-online-temp", "intention-golden"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "golden",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "不自动回写" in result.output

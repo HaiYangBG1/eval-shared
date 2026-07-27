@@ -361,6 +361,8 @@ eval-dataset-promote --agent intention --to regression \
 eval-dataset-promote --agent intention --to golden --item-ids ...
 ```
 
+`--to regression` 默认**双写**：写 Langfuse 镜像的同时回写业务仓 `agents/{agent}/datasets/regression.yaml`（本地 YAML=SSOT，条目带 Langfuse item id + promote 审计字段；用户话术按契约 §2.3 做 PII 脱敏并输出 diff，Langfuse 侧保持原文）。需在业务仓根目录运行；`--no-local-write` 仅限演练场景。`--to golden` 不自动回写（断言需人工设计）。
+
 ### `eval-dspy-pipeline` — 完整流水线
 
 串联四个阶段：DSPy 优化 → PromptFoo A/B 对比 → 决策报告 → Langfuse Prompt 标注。

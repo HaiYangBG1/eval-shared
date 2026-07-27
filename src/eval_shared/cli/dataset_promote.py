@@ -22,17 +22,22 @@ eval-dataset-promote — 把 online-temp dataset 里指定 item 转入 golden �
   - 复制 input / expectedOutput 字段；metadata 加 promoted_from / promoted_at / promoted_reason
   - 目标 item.id 用 sync_dataset 共享算法 compute_item_id 复算（保证同 vars 幂等）
   - 源 item 不删除（让 eval-online 下次跑时自动覆盖清理）
+  - --to regression 默认同时回写本地 `agents/{agent}/datasets/regression.yaml`
+    （本地 YAML=SSOT，契约 §2.3；用户话术经 PII 脱敏后入 git，Langfuse 镜像保持原文）
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
 
 from eval_shared.common.config import init_env
 from eval_shared.common.dataset_item_id import compute_item_id
 from eval_shared.common.langfuse_client import LangfuseClient
+from eval_shared.common.pii import scrub_user_content
+from eval_shared.common.yaml_utils import load_yaml, dump_yaml
 
 
 _VALID_TARGETS = ("golden", "regression")
@@ -55,6 +60,45 @@ def _summarize_input(value: object, max_len: int = 60) -> str:
         s = json.dumps(value, ensure_ascii=False, default=str)
     s = s.replace("\n", " ").strip()
     return s[:max_len] + "…" if len(s) > max_len else s
+
+
+def _local_regression_path(agent: str) -> Path:
+    """本地 regression SSOT 路径（与 sync_dataset._local_path 同约定）。"""
+    return Path.cwd() / "agents" / agent / "datasets" / "regression.yaml"
+
+
+def _write_local_regression(
+    agent: str, dataset_name: str, new_entries: list[dict]
+) -> Path:
+    """把 promote 的条目合并进本地 regression.yaml（按 id 覆盖，其余追加）。"""
+    path = _local_regression_path(agent)
+    existing = load_yaml(path) if path.exists() else []
+    if not isinstance(existing, list):
+        existing = []
+
+    index_by_id = {
+        e.get("id"): i
+        for i, e in enumerate(existing)
+        if isinstance(e, dict) and e.get("id")
+    }
+    for entry in new_entries:
+        eid = entry.get("id")
+        if eid and eid in index_by_id:
+            existing[index_by_id[eid]] = entry
+        else:
+            existing.append(entry)
+
+    header = "\n".join([
+        f'# regression SSOT（入 git）—— Langfuse "{dataset_name}" 仅为运行镜像（契约 §2.3）。',
+        "# 写入：eval-dataset-promote --to regression（自动双写+脱敏）",
+        f"# 恢复：eval-sync-dataset --agent {agent} --type regression --direction push",
+        f"# 条目数  : {len(existing)}",
+        f"# 同步时间: {datetime.now(timezone.utc).isoformat()}",
+        "",
+        "",
+    ])
+    dump_yaml(existing, path, header=header)
+    return path
 
 
 def _list_items(client: LangfuseClient, dataset_name: str) -> None:
@@ -101,6 +145,11 @@ def _list_items(client: LangfuseClient, dataset_name: str) -> None:
     help="列出源 dataset 的所有 item 帮你挑（不执行 promote）",
 )
 @click.option("--dry-run", is_flag=True, help="只打印将要做的操作，不写入 Langfuse")
+@click.option(
+    "--local-write/--no-local-write",
+    default=True,
+    help="--to regression 时同时回写本地 regression.yaml（默认开启；关闭仅限演练场景，契约 §2.3）",
+)
 def main(
     agent: str,
     from_dataset: str | None,
@@ -109,12 +158,23 @@ def main(
     reason: str,
     list_only: bool,
     dry_run: bool,
+    local_write: bool,
 ):
     """把 online-temp 的某些 item promote 到 golden 或 regression。"""
     init_env()
 
     source = _source_dataset_name(agent, from_dataset)
     target = _target_dataset_name(agent, to_kind)
+
+    do_local_write = to_kind == "regression" and local_write and not list_only
+    if do_local_write and not (Path.cwd() / "agents" / agent).is_dir():
+        # 早失败：还没写 Langfuse 就拦下，避免「镜像有、SSOT 没有」的半程状态
+        raise click.ClickException(
+            f"本地目录 agents/{agent}/ 不存在（cwd={Path.cwd()}）。"
+            "请在业务仓根目录运行；确属演练场景可用 --no-local-write 跳过本地回写。"
+        )
+    if to_kind == "regression" and not local_write and not list_only:
+        click.echo("⚠️  已关闭本地回写——契约 §2.3 要求 regression 双写，仅演练场景可这么干。")
 
     click.echo(f"📂 源 : {source}")
     click.echo(f"📂 目标: {target}")
@@ -143,6 +203,8 @@ def main(
 
         promoted_at = datetime.now(timezone.utc).isoformat()
         ok = fail = 0
+        local_entries: list[dict] = []
+        pii_hits = 0
 
         for item_id in ids:
             try:
@@ -188,21 +250,60 @@ def main(
                     f"(target_id={target_item_id or 'auto'})"
                 )
                 ok += 1
-                continue
+            else:
+                try:
+                    resp = client.upsert_dataset_item(body)
+                    click.echo(
+                        f"  ✅ {item_id} → {target} "
+                        f"(target_id={target_item_id or 'auto'})"
+                    )
+                    ok += 1
+                    if not target_item_id and isinstance(resp, dict):
+                        target_item_id = resp.get("id")
+                except Exception as e:
+                    click.echo(f"  ❌ promote 失败 {item_id}: {e}", err=True)
+                    fail += 1
+                    continue
 
-            try:
-                client.upsert_dataset_item(body)
+            if do_local_write:
+                # 本地 SSOT 条目：Langfuse 镜像保持原文，入 git 的用户话术按契约 §2.3 脱敏
+                scrubbed_input, pii_changes = scrub_user_content(src_input)
+                for path_str, before, after in pii_changes:
+                    click.echo(f"  🔒 PII {path_str}: {before!r} → {after!r}")
+                pii_hits += len(pii_changes)
+
+                src_assert = src_meta.get("assert")
+                local_entry: dict = {
+                    "id": target_item_id,
+                    "vars": scrubbed_input,
+                    "assert": src_assert if isinstance(src_assert, list) else [],
+                }
+                if src_expected:
+                    local_entry["expectedOutput"] = src_expected
+                # assert/index 不入 metadata（与 sync_dataset pull 对称，防往返 diff 噪音）
+                local_entry["metadata"] = {
+                    k: v for k, v in target_meta.items() if k not in ("assert", "index")
+                }
+                local_entries.append(local_entry)
+
+        if do_local_write and local_entries:
+            click.echo("")
+            click.echo(f"🔒 PII 扫描：命中 {pii_hits} 处（0 = 无需脱敏）")
+            if dry_run:
                 click.echo(
-                    f"  ✅ {item_id} → {target} "
-                    f"(target_id={target_item_id or 'auto'})"
+                    f"  DRY 本地回写 {len(local_entries)} 条 → {_local_regression_path(agent)}"
                 )
-                ok += 1
-            except Exception as e:
-                click.echo(f"  ❌ promote 失败 {item_id}: {e}", err=True)
-                fail += 1
+            else:
+                local_path = _write_local_regression(agent, target, local_entries)
+                click.echo(f"📝 本地 SSOT 已回写 {len(local_entries)} 条 → {local_path}")
 
         click.echo("")
         click.echo(f"汇总: 成功 {ok} / 失败 {fail}")
+        if to_kind == "golden" and ok and not dry_run:
+            click.echo(
+                "ℹ️  golden 本地 SSOT 不自动回写——断言需人工设计，"
+                "记得把 case 编入 agents/<agent>/datasets/golden.yaml（契约 §2.3）"
+            )
         if fail > 0:
             raise SystemExit(1)
 

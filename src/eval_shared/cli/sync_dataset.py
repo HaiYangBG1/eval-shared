@@ -27,6 +27,7 @@ import httpx
 from eval_shared.common.config import init_env, get_langfuse_config
 from eval_shared.common.dataset_item_id import compute_item_id
 from eval_shared.common.langfuse_client import LangfuseClient
+from eval_shared.common.pii import scrub_user_content
 from eval_shared.common.yaml_utils import load_yaml, dump_yaml
 
 
@@ -93,8 +94,25 @@ def _pull(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
     items = client.get_dataset_items(dataset_name)
 
     # 还原为 PromptFoo 测试格式
-    items_sorted = sorted(items, key=lambda x: (x.get("metadata") or {}).get("index", 0))
+    is_regression = type_ == "regression"
+    if is_regression:
+        # regression 本地 YAML 是 SSOT（契约 §2.3）：pull 只用于首迁/丢库对账，
+        # 会用 Langfuse 镜像覆盖本地。条目按 promoted_at 排序保证文件确定性。
+        click.echo(
+            "   ⚠️  regression 本地 YAML 是 SSOT——pull 会用 Langfuse 镜像覆盖本地"
+            "（仅首迁/对账场景使用，日常方向是 push）"
+        )
+        items_sorted = sorted(
+            items,
+            key=lambda x: (
+                (x.get("metadata") or {}).get("promoted_at", ""),
+                x.get("id") or "",
+            ),
+        )
+    else:
+        items_sorted = sorted(items, key=lambda x: (x.get("metadata") or {}).get("index", 0))
     tests = []
+    pii_hits = 0
     for item in items_sorted:
         metadata = item.get("metadata") or {}
         assert_arr = metadata.get("assert", [])
@@ -110,22 +128,49 @@ def _pull(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
         entry: dict = {"vars": item.get("input", {}), "assert": assert_arr}
         if item.get("expectedOutput"):
             entry["expectedOutput"] = item["expectedOutput"]
+
+        if is_regression:
+            # 无损往返锚点：保留 Langfuse item id 与审计 metadata（assert/index 除外，
+            # 它们在 YAML 里有独立位置）；入 git 前按契约 §2.3 脱敏用户话术
+            scrubbed_vars, changes = scrub_user_content(entry["vars"])
+            entry["vars"] = scrubbed_vars
+            for path_str, before, after in changes:
+                click.echo(f"   🔒 PII {item.get('id')} {path_str}: {before!r} → {after!r}")
+            pii_hits += len(changes)
+
+            extra_meta = {k: v for k, v in metadata.items() if k not in ("assert", "index")}
+            entry = {"id": item.get("id"), **entry}
+            if extra_meta:
+                entry["metadata"] = extra_meta
         tests.append(entry)
 
     out_path = _local_path(agent, type_)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    header = "\n".join([
-        "# 由 eval-sync-dataset 从 Langfuse 同步生成，请勿手动修改。",
-        f'# 来源    : dataset="{dataset_name}"',
-        f"# 条目数  : {len(tests)}",
-        f"# 同步时间: {datetime.now(timezone.utc).isoformat()}",
-        "",
-        "",
-    ])
+    if is_regression:
+        header = "\n".join([
+            f"# regression SSOT（入 git）—— Langfuse \"{dataset_name}\" 仅为运行镜像（契约 §2.3）。",
+            "# 写入：eval-dataset-promote --to regression（自动双写+脱敏）",
+            f"# 恢复：eval-sync-dataset --agent {agent} --type regression --direction push",
+            f"# 条目数  : {len(tests)}",
+            f"# 同步时间: {datetime.now(timezone.utc).isoformat()}",
+            "",
+            "",
+        ])
+    else:
+        header = "\n".join([
+            "# 由 eval-sync-dataset 从 Langfuse 同步生成，请勿手动修改。",
+            f'# 来源    : dataset="{dataset_name}"',
+            f"# 条目数  : {len(tests)}",
+            f"# 同步时间: {datetime.now(timezone.utc).isoformat()}",
+            "",
+            "",
+        ])
 
     dump_yaml(tests, out_path, header=header)
     rel = out_path.relative_to(Path.cwd())
+    if is_regression:
+        click.echo(f"   🔒 PII 扫描：命中 {pii_hits} 处（0 = 无需脱敏）")
     click.echo(f"   ✅ {len(tests)} 条 → {rel}")
 
 
@@ -163,9 +208,14 @@ def _push(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
         input_data = t.get("vars", {})
         assert_arr = t.get("assert", []) if isinstance(t.get("assert"), list) else []
 
-        item_id = compute_item_id(dataset_name, input_data)
+        # regression 条目携带原 Langfuse id（无损往返锚点：脱敏改写过 vars 时
+        # 重算 hash 会漂移，必须用存量 id 才能幂等覆盖）；无 id 条目回退共享算法
+        item_id = t.get("id") or compute_item_id(dataset_name, input_data)
 
         expected = t.get("expectedOutput") or _derive_expected_output(assert_arr)
+
+        # 条目自带的审计 metadata（promoted_* 等）原样带回；assert/index 以 YAML 为准
+        extra_meta = t.get("metadata") if isinstance(t.get("metadata"), dict) else {}
 
         body = {
             "datasetName": dataset_name,
@@ -173,8 +223,9 @@ def _push(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
             "input": input_data,
             "expectedOutput": expected,
             "metadata": {
-                "assert": assert_arr,
                 "source": f"eval-ai-order/{agent}",
+                **extra_meta,
+                "assert": assert_arr,
                 "index": i,
             },
         }
