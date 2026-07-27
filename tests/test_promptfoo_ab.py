@@ -1,5 +1,26 @@
 from __future__ import annotations
 
+from eval_shared.cli.promptfoo_ab import _vars_key
+
+
+def test_vars_key_ignores_trailing_whitespace_in_string_values() -> None:
+    """YAML 折叠标量给 menu_data 带尾换行，promptfoo 返回值无：两者必须同 key。"""
+    golden = {"query": "我一人吃", "menu_data": '[{"name":"米饭"}]\n'}
+    result = {"query": "我一人吃", "menu_data": '[{"name":"米饭"}]'}
+    assert _vars_key(golden) == _vars_key(result)
+
+
+def test_vars_key_ignores_internal_json_whitespace() -> None:
+    """YAML 折叠产生 `}, {"`、promptfoo 链路紧凑化为 `},{"`——JSON 值须规范化后匹配。"""
+    golden = {"menu_data": '[{"a":1}, {"b":2}]\n'}
+    result = {"menu_data": '[{"a":1},{"b":2}]'}
+    assert _vars_key(golden) == _vars_key(result)
+
+
+def test_vars_key_still_distinguishes_different_content() -> None:
+    assert _vars_key({"query": "a"}) != _vars_key({"query": "b"})
+    assert _vars_key({"m": '[{"a":1}]'}) != _vars_key({"m": '[{"a":2}]'})
+
 from eval_shared.cli.promptfoo_ab import (
     _build_run_metadata,
     _downgrade_scoreless_hits_to_miss,

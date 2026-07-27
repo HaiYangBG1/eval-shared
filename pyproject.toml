@@ -1,6 +1,6 @@
 [project]
 name = "eval-shared"
-version = "2.3.0"
+version = "2.3.1"
 description = "AI 评估共享工具包 — Langfuse CLI + PromptFoo Rubrics + DSPy 优化"
 readme = "README.md"
 license = { text = "MIT" }

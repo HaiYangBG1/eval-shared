@@ -170,8 +170,28 @@ def _infer_local_dataset_path(agent: str, dataset_name: str) -> Path:
     return Path(f"agents/{agent}/datasets/{type_}.yaml")
 
 
+def _normalize_var_value(v):
+    """字符串值规范化后再参与匹配键：
+    ① strip——YAML 折叠标量（>）带尾换行而 promptfoo 返回值没有；
+    ② JSON 字符串（如 menu_data）解析后紧凑重序列化——YAML 折叠把换行变
+       逗号后空格（`}, {"`），promptfoo 链路又紧凑化为 `},{"`，内部空白
+       不一致会让全部 case 匹配失败、静默计零（2026-07-27 实测 0/9）。"""
+    if not isinstance(v, str):
+        return v
+    s = v.strip()
+    if s[:1] in ("[", "{"):
+        try:
+            return json.dumps(
+                json.loads(s), sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            )
+        except ValueError:
+            pass
+    return s
+
+
 def _vars_key(vars_data: dict) -> str:
-    return json.dumps(vars_data, sort_keys=True, ensure_ascii=False)
+    normalized = {k: _normalize_var_value(v) for k, v in vars_data.items()}
+    return json.dumps(normalized, sort_keys=True, ensure_ascii=False)
 
 
 def _merge_hit_and_miss(

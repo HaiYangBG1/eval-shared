@@ -12,6 +12,12 @@
 
 ---
 
+## [2.3.1] - 2026-07-27
+
+### Fixed
+
+- **`eval-promptfoo-ab` 多行/JSON 型 vars 静默计零**：合并层按 `_vars_key(vars)` 匹配本地 promptfoo 结果，两类空白不一致导致全部匹配失败并计 0/9（实测 recommend A/B 两侧 0%，且把 0.0 分写回 Langfuse 污染缓存）：① YAML 折叠标量尾换行 vs promptfoo 返回值无；② YAML 折叠把换行折成 `}, {"` 而 promptfoo 链路紧凑化为 `},{"`。修复：`_normalize_var_value` 对字符串 strip、对 JSON 字符串解析后规范重序列化再参与匹配键；测试 3 例钉住。intention（单一 query var）不受影响，多 var agent（recommend/replenish）此前 A/B 结果均不可信。被污染的历史 ab-* run 分数用 `--no-cache` 重跑覆盖。
+
 ## [2.3.0] - 2026-07-26
 
 ### Added — 新增
