@@ -49,7 +49,8 @@ eval-shared/
 │   │   ├── compare.py
 │   │   ├── report.py
 │   │   ├── promptfoo_ab.py
-│   │   └── dspy_pipeline.py
+│   │   ├── dspy_pipeline.py
+│   │   └── dataset_promote.py
 │   └── dspy/
 │       ├── loader.py
 │       ├── module_factory.py

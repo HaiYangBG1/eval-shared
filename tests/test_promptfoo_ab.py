@@ -563,3 +563,29 @@ def test_run_promptfoo_accepts_fresh_output_despite_nonzero_exit(tmp_path, monke
 
     _run_promptfoo(tmp_path / "cfg.yaml", str(output), tmp_path / "p.yaml")
     assert output.exists()
+
+
+def test_run_promptfoo_subset_rejects_incomplete_results(tmp_path, monkeypatch) -> None:
+    """结果数 < 子集数 = PromptFoo 中途丢 case，必须硬报错而非静默混入统计（事故链第三道闸）。"""
+    from eval_shared.cli.promptfoo_ab import _run_promptfoo_subset
+
+    dataset = [{"vars": {"query": "a"}}, {"vars": {"query": "b"}}]
+    monkeypatch.setattr(_ab_module, "_run_promptfoo", lambda *a, **k: None)
+    monkeypatch.setattr(_ab_module, "load_results", lambda _: [{"vars": {"query": "a"}}])
+
+    config = tmp_path / "promptfooconfig.yaml"
+    config.write_text("prompts: [file://prompt.yaml]\n", encoding="utf-8")
+
+    with pytest.raises(click.ClickException, match="结果不完整"):
+        _run_promptfoo_subset(
+            agent="agent",
+            full_dataset=dataset,
+            dataset_name="agent-golden",
+            miss_item_ids=[
+                _ab_module.compute_item_id("agent-golden", c["vars"]) for c in dataset
+            ],
+            business_config_path=config,
+            prompt_path=tmp_path / "p.yaml",
+            output_path=str(tmp_path / "out.json"),
+            tmp_basename="test-subset-guard",
+        )
