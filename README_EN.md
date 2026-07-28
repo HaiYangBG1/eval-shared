@@ -74,6 +74,7 @@ eval-shared/
 | `eval-promptfoo-ab` | Run PromptFoo A/B comparison for production vs staging |
 | `eval-dspy-optimize` | Run DSPy optimization |
 | `eval-dspy-pipeline` | Run DSPy optimization, A/B comparison, report, and Langfuse annotation |
+| `eval-dataset-promote` | Promote items from `online-temp` into `golden` / `regression` datasets (regression writes are double-written to the local YAML SSOT with audit metadata and PII scrubbing) |
 
 ## Quick Start For A New Evaluation Project
 
@@ -162,6 +163,8 @@ OPENAI_API_KEY=sk-xxx
 LANGFUSE_PUBLIC_KEY=pk-lf-xxx
 LANGFUSE_SECRET_KEY=sk-lf-xxx
 LANGFUSE_HOST=https://your-langfuse.com
+# LANGFUSE_BASE_URL is accepted as an alias; LANGFUSE_HOST wins when both are set
+# LANGFUSE_SSL_VERIFY=false   # only for self-signed instances
 
 # DSPy optimizer
 DSPY_LM_MODEL=openai/<optimizer-model-name>
@@ -183,5 +186,14 @@ eval-promptfoo-ab --agent intent-agent
 eval-promote --agent intent-agent
 ```
 
-`eval-promptfoo-ab` uses a net-improvement gate: improvements must outnumber
-regressions and the candidate pass rate must be no lower than the baseline.
+`eval-promptfoo-ab` emits a three-state verdict with a regression-first veto:
+
+- `A/B ❌` (WORSE): any regression (baseline PASS → candidate FAIL), or the pass
+  rate drops beyond tolerance — one regression is enough to block.
+- `A/B ✅` (BETTER): no regressions, at least one improvement, and the pass rate
+  gain exceeds the tolerance threshold.
+- `A/B 🟰` (SAME): everything else — changes within the tolerance band.
+
+`eval-promote` refuses to move the `production` label while the staging version
+carries an `A/B ❌` verdict; pass `--force` only after manually confirming the
+failure is evaluation noise.

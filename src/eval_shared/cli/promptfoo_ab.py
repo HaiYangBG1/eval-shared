@@ -86,6 +86,10 @@ def _run_promptfoo(config_path: Path, output_path: str, prompt_path: Path) -> No
     但评估结果已正确写入文件）。
     """
     abs_prompt = prompt_path.resolve()
+    # 先清掉上一轮的结果文件——否则 PromptFoo 崩溃时下方 exists() 会把陈旧文件
+    # 误判为"本次已生成"，整条 A/B 链在旧数据上得出假 verdict（2026-07-28 实锤：
+    # Node ABI 崩溃 + 07-27 陈旧 candidate 文件 → 假 "A/B ✅ 建议 promote"）
+    Path(output_path).unlink(missing_ok=True)
     cmd = [
         "npx", "promptfoo", "eval",
         "-c", str(config_path),
@@ -98,13 +102,13 @@ def _run_promptfoo(config_path: Path, output_path: str, prompt_path: Path) -> No
     result = subprocess.run(cmd)
 
     output_exists = Path(output_path).exists()
-    if result.returncode != 0 and not output_exists:
+    if not output_exists:
         raise click.ClickException(
-            f"PromptFoo 评估失败 (exit code {result.returncode})，且未生成结果文件"
+            f"PromptFoo 评估失败 (exit code {result.returncode})，未生成结果文件"
         )
-    if result.returncode != 0 and output_exists:
+    if result.returncode != 0:
         click.echo(
-            f"  ⚠️ PromptFoo 退出码 {result.returncode}（结果文件已生成，忽略 telemetry 超时）"
+            f"  ⚠️ PromptFoo 退出码 {result.returncode}（本次结果文件已生成，忽略 telemetry 超时）"
         )
     click.echo("  ✅ PromptFoo 评估完成")
 
@@ -149,7 +153,15 @@ def _run_promptfoo_subset(
     try:
         click.echo(f"  📌 子集跑：{len(subset)}/{len(full_dataset)} 条 miss")
         _run_promptfoo(tmp_config, output_path, prompt_path)
-        return load_results(output_path)
+        results = load_results(output_path)
+        # 结果数硬校验：少于子集数 = PromptFoo 中途崩溃/静默丢 case，
+        # 绝不能把未跑的 case 当失败混入统计（证据即运行）
+        if len(results) < len(subset):
+            raise click.ClickException(
+                f"PromptFoo 结果不完整：期望 {len(subset)} 条、实得 {len(results)} 条"
+                "（可能中途崩溃，检查 node 版本 / better-sqlite3 ABI）"
+            )
+        return results
     finally:
         cleanup_subset_eval_files(tmp_config, tmp_dataset)
 
@@ -236,6 +248,11 @@ def _merge_hit_and_miss(
         else:
             r = miss_by_vars.get(_vars_key(vars_data))
             if r is None:
+                # 不应发生：上游已对结果数硬校验；仍留兜底但必须喊出来，
+                # 静默把未跑 case 记为失败会污染 verdict
+                click.echo(
+                    f"  ⚠️ item {item_id} 在 PromptFoo 结果中找不到匹配（vars key 不一致？），按失败计"
+                )
                 results.append({"vars": vars_data, "success": False, "_cache_hit": False})
             else:
                 results.append({**r, "_cache_hit": False})

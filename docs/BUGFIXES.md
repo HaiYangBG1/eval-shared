@@ -282,3 +282,17 @@ def main(agent: str, dry_run: bool, force: bool):
 ```
 
 测试 `tests/test_promote_prompt.py::test_promote_force_bypasses_ab_failure_gate` 覆盖该路径。
+
+---
+
+### #16 promptfoo-ab 把上一轮的陈旧结果文件当本次结果（假 verdict 事故）
+
+**文件**：`src/eval_shared/cli/promptfoo_ab.py`
+
+**症状**（2026-07-28 实锤）：shell 里的 Node 是 v23，而仓库 `.nvmrc` 要求 22——better-sqlite3 ABI 不匹配导致 PromptFoo 启动即崩（`ERR_DLOPEN_FAILED`），没有写出任何新结果。但 `output/{agent}-ab-*.json` 里还留着 07-27 的旧文件，`_run_promptfoo` 用 `Path(output_path).exists()` 判断"结果已生成"恒真，于是整条 A/B 链在昨天的数据上继续算分：合并层把本地新增却在旧结果中不存在的 case 静默计为失败，最终产出一份数字自洽、结论完整的**假报告**（甚至给出"A/B ✅ 建议 promote"）。连续三轮"迭代→重跑"全部在回放旧数据，迭代师完全无感。
+
+**根因**：三层防线全部缺位——① 实跑前不清理旧输出文件，`exists()` 区分不了"本次生成"与"上次残留"；② 非零退出码被"telemetry 超时"的容忍逻辑一律放行；③ 合并层对"promptfoo 结果数 < 请求 case 数"没有任何校验，缺的 case 静默计 fail。
+
+**修复**（v2.5.0）：① `_run_promptfoo` 实跑前 `unlink` 旧输出，此后 `exists()` 恒等于"本次生成"；② 缺结果文件时无论退出码一律 `ClickException`；③ `_run_promptfoo_subset` 对结果数硬校验（少于子集数即报错并提示排查 node / better-sqlite3 ABI）；④ `_merge_hit_and_miss` 兜底路径逐条告警不再静默。测试 2 例钉住（陈旧文件必须被清除 / telemetry 容忍仅限新文件）。
+
+**教训**：「证据即运行」不仅要求跑过，还要求证据文件与本次运行强绑定。凡是"跑完读文件"的链路，跑前清理旧产物应是标配。

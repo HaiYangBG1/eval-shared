@@ -521,3 +521,45 @@ def test_improvement_within_tolerance_is_not_safe() -> None:
     )
     assert "✅ **安全升级**" not in report
     assert "➡️ **无明显改善**" in report
+
+
+# ── 陈旧结果文件护栏（2026-07-28：Node ABI 崩溃 + 07-27 陈旧文件 → 假 A/B verdict）──
+
+import click
+import pytest
+
+from eval_shared.cli import promptfoo_ab as _ab_module
+from eval_shared.cli.promptfoo_ab import _run_promptfoo
+
+
+def test_run_promptfoo_deletes_stale_output_before_running(tmp_path, monkeypatch) -> None:
+    """PromptFoo 崩溃未产出新文件时必须报错，绝不能把上一轮的陈旧结果当本次结果。"""
+    stale_output = tmp_path / "agent-ab-candidate.json"
+    stale_output.write_text('{"results": {"results": []}}', encoding="utf-8")
+
+    class _CrashResult:
+        returncode = 1
+
+    monkeypatch.setattr(_ab_module.subprocess, "run", lambda cmd: _CrashResult())
+
+    with pytest.raises(click.ClickException, match="未生成结果文件"):
+        _run_promptfoo(tmp_path / "cfg.yaml", str(stale_output), tmp_path / "p.yaml")
+
+    assert not stale_output.exists(), "陈旧结果文件应在实跑前被清除"
+
+
+def test_run_promptfoo_accepts_fresh_output_despite_nonzero_exit(tmp_path, monkeypatch) -> None:
+    """telemetry 超时类非零退出码仍然容忍——但仅当本次真的写出了新文件。"""
+    output = tmp_path / "agent-ab-candidate.json"
+
+    class _TelemetryTimeout:
+        returncode = 100
+
+    def _fake_run(cmd):
+        output.write_text('{"results": {"results": []}}', encoding="utf-8")
+        return _TelemetryTimeout()
+
+    monkeypatch.setattr(_ab_module.subprocess, "run", _fake_run)
+
+    _run_promptfoo(tmp_path / "cfg.yaml", str(output), tmp_path / "p.yaml")
+    assert output.exists()

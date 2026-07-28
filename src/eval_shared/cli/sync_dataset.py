@@ -191,11 +191,12 @@ def _push(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
 
     click.echo(f'📤 [{agent}] 准备推送 {len(tests)} 条到 dataset "{dataset_name}"')
 
-    # 确保 dataset 存在
+    # 确保 dataset 存在（来源标识用运行目录名，本包不假设业务仓名）
+    project_name = Path.cwd().name
     if not client.dataset_exists(dataset_name):
         client.create_dataset(
             dataset_name,
-            f"Synced from eval-ai-order/{agent} on {datetime.now(timezone.utc).isoformat()}",
+            f"Synced from {project_name}/{agent} on {datetime.now(timezone.utc).isoformat()}",
         )
         click.echo(f'   ✨ 新建 dataset "{dataset_name}"')
     else:
@@ -223,7 +224,7 @@ def _push(client: LangfuseClient, agent: str, dataset_name: str, type_: str) -> 
             "input": input_data,
             "expectedOutput": expected,
             "metadata": {
-                "source": f"eval-ai-order/{agent}",
+                "source": f"{project_name}/{agent}",
                 **extra_meta,
                 "assert": assert_arr,
                 "index": i,

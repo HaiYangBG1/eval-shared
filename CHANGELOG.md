@@ -12,6 +12,24 @@
 
 ---
 
+## [2.5.0] - 2026-07-28
+
+### Fixed
+
+- **🔴 `eval-promptfoo-ab` 陈旧结果文件当真（假 verdict 事故）**：PromptFoo 因环境问题（Node 23 vs `.nvmrc` 22 的 better-sqlite3 ABI 不匹配）中途崩溃时，`_run_promptfoo` 用 `Path(output).exists()` 判断"结果已生成"——上一轮的陈旧输出文件让判断恒真，整条 A/B 链在 07-27 的旧数据上得出假 "A/B ✅ 建议 promote"。修复三连：① 实跑前先 `unlink` 旧输出文件，`exists()` 恒等于"本次生成"；② 无论退出码，缺结果文件一律硬报错；③ 子集结果数 < 子集条数时硬报错（禁止把未跑 case 静默计为失败混入 verdict），合并层兜底路径补显式告警。测试 2 例钉住（陈旧文件清除 / telemetry 超时容忍仅限新文件）。
+- **`_merge_hit_and_miss` 静默填充失败**：promptfoo 结果中匹配不到的 item 此前无声计 fail，现改为逐条告警（上游已有条数硬校验，此处为兜底可见性）。
+
+### Changed
+
+- **#8：`eval-dspy-pipeline` 决策建议改读结构化 verdict**：报告 Part 3 与终端最终建议不再字符串匹配 A/B 报告 markdown 文案（"🔴 回归"/"✅ **安全升级**"），统一读 `output/{agent}-ab-summary.json` 经 `verdict_from_ab_summary` 的三态枚举；SAME 获得独立分支（🟰 人工决策），文案矛盾时以结构化结论为准。测试 4 例。
+- **去业务硬编码**：`sync_dataset` push 的 dataset 描述与 `metadata.source` 不再写死 `eval-ai-order`，改用运行目录名（`Path.cwd().name`）——本包不假设业务仓名。
+
+### Added
+
+- **CI（#20）**：`.github/workflows/ci.yml`——push/PR 触发，Python 3.11/3.12 矩阵，uv 安装 + pytest 门禁。
+- **`uv.lock`（#20）**：锁定依赖解析入 git。
+- **README_EN 三节对齐（#20）**：CLI Commands 补 `eval-dataset-promote`（11 条对齐）；Environment Variables 补 `LANGFUSE_BASE_URL` 双名兼容与 `LANGFUSE_SSL_VERIFY`；A/B 判定描述由旧"净改善"口径改为三态 verdict + 回归一票阻断 + promote 阻断门（与契约/AGENTS.md 一致）。
+
 ## [2.4.0] - 2026-07-28
 
 ### Added

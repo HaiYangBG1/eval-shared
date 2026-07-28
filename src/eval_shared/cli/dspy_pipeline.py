@@ -104,6 +104,7 @@ def _generate_pipeline_report(
     ab_report_path: str | None,
     skipped_ab: bool,
     skip_reason: str = "",
+    ab_verdict: ABVerdict | None = None,
 ) -> str:
     """生成统一决策报告（Markdown）。"""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -168,20 +169,17 @@ def _generate_pipeline_report(
             f"{skip_reason}",
             "",
         ])
-    elif dspy_report and ab_report_path and Path(ab_report_path).exists():
-        ab_text = Path(ab_report_path).read_text("utf-8")
-        has_regression = "🔴 回归" in ab_text
-        safe_upgrade = "✅ **安全升级**" in ab_text
-
-        if has_regression:
+    elif dspy_report and ab_verdict is not None:
+        # 结论以结构化 ab-summary.json 的三态 verdict 为准（不再字符串匹配报告文案）
+        if ab_verdict is ABVerdict.WORSE:
             lines.extend([
                 "### ⚠️ 建议：暂缓升级",
                 "",
-                "DSPy 优化显示正向提升，但 PromptFoo 回归测试发现回归用例。",
+                "DSPy 优化显示正向提升，但 PromptFoo A/B 判定为 ❌（存在回归或通过率下降）。",
                 "建议排查回归原因后再决定是否升级。",
                 "",
             ])
-        elif safe_upgrade:
+        elif ab_verdict is ABVerdict.BETTER:
             delta = dspy_report.get("delta", 0)
             lines.extend([
                 "### ✅ 建议：执行升级",
@@ -195,11 +193,12 @@ def _generate_pipeline_report(
                 "```",
                 "",
             ])
-        else:
+        else:  # SAME
             lines.extend([
-                "### 🤔 建议：人工审核",
+                "### 🟰 建议：人工决策（候选与基线相当）",
                 "",
-                "请查看上方 A/B 对比详情，人工判断是否接受变更。",
+                "PromptFoo A/B 判定为 🟰：无回归，但改善不显著（在容忍阈值内）。",
+                "promote 不会被阻断，但也无明显升级理由；请结合上方 DSPy 与 A/B 详情人工判断。",
                 "",
             ])
     else:
@@ -335,9 +334,17 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
     click.echo("  Phase 3: 生成统一决策报告")
     click.echo("=" * 56)
 
+    # 先读结构化 A/B 摘要（Phase 2 的 eval-promptfoo-ab 已写出），报告与终端建议共用同一 verdict
+    ab_summary_path = f"output/{agent}-ab-summary.json"
+    verdict: ABVerdict | None = None
+    if Path(ab_summary_path).exists():
+        ab_summary = json.loads(Path(ab_summary_path).read_text("utf-8"))
+        verdict = verdict_from_ab_summary(ab_summary)
+
     report = _generate_pipeline_report(
         agent, dspy_report, ab_report_path,
         skipped_ab=False,
+        ab_verdict=verdict,
     )
 
     pipeline_report_path = f"output/{agent}-pipeline-report.md"
@@ -353,24 +360,21 @@ def main(config_path: str, skip_optimize: bool, dry_run: bool, seed: int):
     click.echo("=" * 56)
 
     prompt_name = config.get("output", {}).get("prompt_name", f"{agent}-prompt")
-    ab_summary_path = f"output/{agent}-ab-summary.json"
 
-    if Path(ab_summary_path).exists():
-        ab_summary = json.loads(Path(ab_summary_path).read_text("utf-8"))
-        verdict = verdict_from_ab_summary(ab_summary)
+    if verdict is not None:
         _annotate_prompt(prompt_name, verdict)
     else:
         click.echo("  ⚠️ 未找到 A/B 摘要文件，跳过标注")
 
-    # 终端最终建议
-    if Path(ab_report_path).exists():
-        ab_text = Path(ab_report_path).read_text("utf-8")
-        if "🔴 回归" in ab_text:
-            click.echo("\n⚠️  存在回归用例，建议排查后再决定。详见报告。")
-        elif "✅ **安全升级**" in ab_text:
-            click.echo(f"\n🎉 建议升级！执行: npm run promote -- --agent {agent}")
-        else:
-            click.echo("\n🤔 请查看报告做最终决策。")
+    # 终端最终建议 —— 与报告 Part 3 同源（ab-summary.json 的结构化 verdict）
+    if verdict is ABVerdict.WORSE:
+        click.echo("\n⚠️  A/B ❌：存在回归或通过率下降，建议排查后再决定。详见报告。")
+    elif verdict is ABVerdict.BETTER:
+        click.echo(f"\n🎉 A/B ✅：建议升级！执行: npm run promote -- --agent {agent}")
+    elif verdict is ABVerdict.SAME:
+        click.echo("\n🟰 A/B 🟰：候选与基线相当，promote 不会被阻断，但无明显升级理由，请人工决策。")
+    else:
+        click.echo("\n🤔 未找到 A/B 摘要，请查看报告做最终决策。")
     click.echo("")
 
 
