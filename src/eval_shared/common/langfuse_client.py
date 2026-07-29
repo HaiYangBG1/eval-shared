@@ -353,7 +353,10 @@ class LangfuseClient:
                     "name": name,
                     "limit": actual_page_size,
                     "page": page,
-                    "fromTimestamp": since,
+                    # observations API 的时间过滤参数是 fromStartTime——
+                    # 传 fromTimestamp 会被服务端静默忽略、退化为拉全史（BUGFIXES #17，
+                    # 2026-07-29 实测 totalItems 3255 vs 9）。scores API 才是 fromTimestamp。
+                    "fromStartTime": since,
                 },
             )
             r.raise_for_status()

@@ -12,6 +12,12 @@
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **🔴 eval-online 时间窗过滤从未生效（BUGFIXES #17）**：observations API 时间参数误用 `fromTimestamp`（scores API 的参数名），服务端静默忽略 → 每次都在拉全史（实测 totalItems 3255 vs 9）。改 `fromStartTime` + MockTransport 测试钉住。历史「窗口体量超预期/连续达 limit」怪象同源；判官重校准「n=2579 基线」因此作废（97% 为 04~06 旧流量）。
+
 ## [2.6.0] - 2026-07-29
 
 > 语义澄清（#42④）：tag `v2.5.0` 指向 `efbf0ec`；其后 `24cb7ec`（子集结果数护栏测试 + README_EN 目录树补 dataset_promote.py，reviewer 核查门 P1/P2）为测试/文档补充，无行为变更、有意未 bump，随本版本一并发布。

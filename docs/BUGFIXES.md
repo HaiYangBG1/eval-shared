@@ -296,3 +296,13 @@ def main(agent: str, dry_run: bool, force: bool):
 **修复**（v2.5.0）：① `_run_promptfoo` 实跑前 `unlink` 旧输出，此后 `exists()` 恒等于"本次生成"；② 缺结果文件时无论退出码一律 `ClickException`；③ `_run_promptfoo_subset` 对结果数硬校验（少于子集数即报错并提示排查 node / better-sqlite3 ABI）；④ `_merge_hit_and_miss` 兜底路径逐条告警不再静默。测试 2 例钉住（陈旧文件必须被清除 / telemetry 容忍仅限新文件）。
 
 **教训**：「证据即运行」不仅要求跑过，还要求证据文件与本次运行强绑定。凡是"跑完读文件"的链路，跑前清理旧产物应是标配。
+
+### #17 eval-online 时间窗参数名错误——窗口过滤从未生效（拉全史）
+
+**症状**（2026-07-29 实锤）：`eval-online --hours 12` 拉回的 observation 中 97% 是 2026-04~06 的旧流量（判死 1180 条里 1146 条 obs startTime 在 4-6 月）；历史上「48h 窗自然流量体量超预期、连续多轮达 limit 上限」的怪象同源。判官重校准清窗轮据此产出的「n=2579 基线」实为三个月旧流量重评读数，基线口径作废重拍。
+
+**根因**：`langfuse_client.get_observations` 给 `/api/public/observations` 传的时间过滤参数名是 `fromTimestamp`，但该 API 认的是 **`fromStartTime`**（`fromTimestamp` 是 scores API 的参数）。自托管 Langfuse 对未知参数**静默忽略**，查询退化为无时间过滤拉全史。实测同一查询：`fromTimestamp` → totalItems=3255（全史）；`fromStartTime` → totalItems=9（真实窗口内）。曾被误归因为水位线 gap-extension（该机制需要 `.eval-online-state.json` 存在，实际该文件因从未有完整批次而不存在）。
+
+**修复**（2026-07-29）：参数名改 `fromStartTime`，注释钉死两个 API 的参数差异；测试 1 例用 MockTransport 断言必须传 `fromStartTime` 且不得传 `fromTimestamp`。
+
+**教训**：对「静默忽略未知参数」的 API，窗口/过滤类参数上线时必须做一次**边界实测**（窗口内外各取样本核对返回量），不能只看请求成功。

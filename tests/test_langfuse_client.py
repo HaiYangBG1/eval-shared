@@ -246,3 +246,32 @@ def test_delete_all_dataset_items_iterates_each_item() -> None:
         "https://langfuse.example/api/public/dataset-items/item-2",
         "https://langfuse.example/api/public/dataset-items/item-3",
     ]
+
+
+# ── observations 时间窗参数（BUGFIXES #17）──
+
+
+def test_get_observations_uses_from_start_time_param() -> None:
+    """observations API 时间过滤必须传 fromStartTime。
+
+    fromTimestamp 会被服务端静默忽略、退化为拉全史（2026-07-29 实测
+    totalItems 3255 vs 9）——eval-online 的 --hours 窗口因此从未生效过。
+    """
+    import httpx
+
+    from eval_shared.common.langfuse_client import LangfuseClient
+
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(dict(request.url.params))
+        return httpx.Response(200, json={"data": []})
+
+    client = LangfuseClient(
+        config={"base_url": "https://langfuse.test", "auth_header": "Basic x"},
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    client.get_observations("点餐LLM", "2026-07-29T00:00:00Z", limit=5)
+
+    assert captured.get("fromStartTime") == "2026-07-29T00:00:00Z"
+    assert "fromTimestamp" not in captured
