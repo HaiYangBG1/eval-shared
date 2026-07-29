@@ -12,9 +12,9 @@
 
 ---
 
-## [Unreleased]
+## [2.6.0] - 2026-07-29
 
-> 语义澄清（#42④）：tag `v2.5.0` 指向 `efbf0ec`；其后 `24cb7ec`（子集结果数护栏测试 + README_EN 目录树补 dataset_promote.py，reviewer 核查门 P1/P2）为测试/文档补充，无行为变更、有意未 bump，随下一版本一并发布。
+> 语义澄清（#42④）：tag `v2.5.0` 指向 `efbf0ec`；其后 `24cb7ec`（子集结果数护栏测试 + README_EN 目录树补 dataset_promote.py，reviewer 核查门 P1/P2）为测试/文档补充，无行为变更、有意未 bump，随本版本一并发布。
 
 ### Added
 
