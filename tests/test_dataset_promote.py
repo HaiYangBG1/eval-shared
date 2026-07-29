@@ -117,12 +117,14 @@ def test_promote_copies_item_with_promoted_metadata(monkeypatch) -> None:
     assert "promoted_at" in meta
 
 
-def test_promote_list_input_gets_stable_id(monkeypatch) -> None:
-    """#17：Dify obs 的 messages 数组（list 型 input）也必须算确定性 id。
+def test_promote_list_input_parsed_to_dict_vars_with_stable_id(
+    monkeypatch, tmp_path
+) -> None:
+    """#39 方案 A：messages 数组按映射解析成 dict 型 vars，id 基于解析后 vars。
 
-    07-23 起三节点 obs input 均为 messages 数组；若 id=None，重复 promote
-    时 Langfuse 分配随机 id → 目标数据集产生重复 item。
+    #17 的幂等根基保持：同一输入重复 promote 得到同一 id，不产生重复 item。
     """
+    _chdir_repo_root(monkeypatch, tmp_path)
     src_input = [
         {"role": "system", "content": "你是点餐助手"},
         {"role": "user", "content": "来一份小炒肉"},
@@ -144,11 +146,11 @@ def test_promote_list_input_gets_stable_id(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     body = fake.upserted_items[0]
-    assert body["id"] == compute_item_id("intention-regression", src_input)
+    parsed = {"query": "来一份小炒肉"}
+    assert body["input"] == parsed
+    assert body["id"] == compute_item_id("intention-regression", parsed)
     # 同一输入重算必须得到同一 id（幂等的根基）
-    assert compute_item_id("intention-regression", src_input) == compute_item_id(
-        "intention-regression", list(src_input)
-    )
+    assert body["id"] == compute_item_id("intention-regression", dict(parsed))
 
 
 def test_promote_creates_target_dataset_if_missing(monkeypatch) -> None:
@@ -273,7 +275,12 @@ def _fake_with_messages_item() -> FakeClient:
 
 
 def _chdir_repo_root(monkeypatch, tmp_path, agent: str = "intention") -> None:
-    (tmp_path / "agents" / agent / "datasets").mkdir(parents=True)
+    datasets = tmp_path / "agents" / agent / "datasets"
+    datasets.mkdir(parents=True)
+    # 契约 §2.3：regression promote 需 per-agent 变量映射（intention 类无上下文段落）
+    (datasets / "var-mapping.yaml").write_text(
+        "query_var: query\nsections: {}\n", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
 
 
@@ -293,11 +300,12 @@ def test_promote_regression_writes_local_ssot_scrubbed(monkeypatch, tmp_path) ->
     entries = load_yaml(tmp_path / "agents" / "intention" / "datasets" / "regression.yaml")
     assert len(entries) == 1
     entry = entries[0]
-    # id 用未脱敏 input 复算（与 Langfuse 镜像一致，往返幂等锚点）
-    assert entry["id"] == compute_item_id("intention-regression", _MESSAGES_INPUT)
-    # 本地入 git 的用户话术已脱敏；system（菜单）不碰
-    assert entry["vars"][1]["content"] == "订餐电话<PHONE>"
-    assert "1300000021" in entry["vars"][0]["content"]
+    # #39 方案 A：消息数组解析为 dict 型 vars（promptfoo 可直接消费），system 消息丢弃
+    parsed = {"query": "订餐电话13812345678"}
+    # id 用未脱敏解析结果复算（与 Langfuse 镜像一致，往返幂等锚点）
+    assert entry["id"] == compute_item_id("intention-regression", parsed)
+    # 本地入 git 的用户话术已脱敏
+    assert entry["vars"] == {"query": "订餐电话<PHONE>"}
     # 审计字段齐全（assert 不入 metadata，有独立位置）
     meta = entry["metadata"]
     assert meta["promoted_from"] == "intention-online-temp"
@@ -305,7 +313,7 @@ def test_promote_regression_writes_local_ssot_scrubbed(monkeypatch, tmp_path) ->
     assert "promoted_at" in meta and "assert" not in meta
     assert entry["assert"] == []
     # Langfuse 镜像保持原文（Judge 链路不脱敏，2026-07-28 拍板）
-    assert fake.upserted_items[0]["input"][1]["content"] == "订餐电话13812345678"
+    assert fake.upserted_items[0]["input"] == parsed
     assert "PII" in result.output and "<PHONE>" in result.output
 
 
@@ -377,6 +385,138 @@ def test_promote_regression_dry_run_previews_local_write(monkeypatch, tmp_path) 
     assert not (tmp_path / "agents" / "intention" / "datasets" / "regression.yaml").exists()
     assert "DRY 本地回写" in result.output
     assert fake.upserted_items == []
+
+
+def test_promote_regression_messages_without_mapping_fails_item(
+    monkeypatch, tmp_path
+) -> None:
+    """契约 §2.3：消息数组 + 无 var-mapping.yaml → 该条硬失败，Langfuse/本地都不写。"""
+    (tmp_path / "agents" / "intention" / "datasets").mkdir(parents=True)  # 故意不放映射
+    monkeypatch.chdir(tmp_path)
+    fake = _fake_with_messages_item()
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code != 0
+    assert fake.upserted_items == []
+    assert "var-mapping.yaml" in result.output
+
+
+def test_promote_regression_section_missing_fails_item(monkeypatch, tmp_path) -> None:
+    """契约 §2.3：配置的段落标题在消息中缺失 → 硬失败，不写半程、不猜测。"""
+    datasets = tmp_path / "agents" / "recommend" / "datasets"
+    datasets.mkdir(parents=True)
+    (datasets / "var-mapping.yaml").write_text(
+        'query_var: query\nsections:\n  "Menu Data": menu_data\n', encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+    fake = FakeClient(
+        items_by_id={
+            "src-1": {
+                "id": "src-1",
+                "input": [
+                    {"role": "user", "content": "# Context Information\n\n## 1. [Rule Class]\n\n单人餐"},
+                    {"role": "user", "content": "来个招牌菜"},
+                ],
+                "metadata": {},
+            }
+        },
+        existing_datasets={"recommend-online-temp", "recommend-regression"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "recommend",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code != 0
+    assert fake.upserted_items == []
+    assert "[Menu Data]" in result.output
+
+
+def test_promote_regression_dict_input_passthrough(monkeypatch, tmp_path) -> None:
+    """契约 §2.3 兜底：input 已是 dict → 原样透传（幂等，重复 promote 安全）。"""
+    _chdir_repo_root(monkeypatch, tmp_path)
+    src_input = {"query": "来一份小炒肉", "rule_class": "推荐菜"}
+    fake = FakeClient(
+        items_by_id={"src-1": {"id": "src-1", "input": src_input, "metadata": {}}},
+        existing_datasets={"intention-online-temp", "intention-regression"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.upserted_items[0]["input"] == src_input
+    assert fake.upserted_items[0]["id"] == compute_item_id(
+        "intention-regression", src_input
+    )
+
+
+def test_promote_regression_multi_turn_marked(monkeypatch, tmp_path) -> None:
+    """契约 §2.3④：多轮观测历史轮丢弃，但必须打 multi_turn 标记 + 喊出来。"""
+    _chdir_repo_root(monkeypatch, tmp_path)
+    src_input = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "推荐当季新品"},
+        {"role": "assistant", "content": "好的，为您推荐…"},
+        {"role": "user", "content": "这不好吃"},
+    ]
+    fake = FakeClient(
+        items_by_id={"src-1": {"id": "src-1", "input": src_input, "metadata": {}}},
+        existing_datasets={"intention-online-temp", "intention-regression"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "regression",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "多轮观测" in result.output
+    assert fake.upserted_items[0]["input"] == {"query": "这不好吃"}
+    assert fake.upserted_items[0]["metadata"]["multi_turn"] is True
+    entries = load_yaml(tmp_path / "agents" / "intention" / "datasets" / "regression.yaml")
+    assert entries[0]["metadata"]["multi_turn"] is True
+
+
+def test_promote_golden_keeps_raw_input(monkeypatch, tmp_path) -> None:
+    """#39 范围纪律：--to golden 不做变量解析，保持原行为（断言需人工设计）。"""
+    _chdir_repo_root(monkeypatch, tmp_path)
+    src_input = [
+        {"role": "system", "content": "你是点餐助手"},
+        {"role": "user", "content": "来一份小炒肉"},
+    ]
+    fake = FakeClient(
+        items_by_id={"src-1": {"id": "src-1", "input": src_input, "metadata": {}}},
+        existing_datasets={"intention-online-temp", "intention-golden"},
+    )
+
+    result = _invoke(
+        monkeypatch, fake,
+        "--agent", "intention",
+        "--to", "golden",
+        "--item-ids", "src-1",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert fake.upserted_items[0]["input"] == src_input
+    assert fake.upserted_items[0]["id"] == compute_item_id(
+        "intention-golden", src_input
+    )
 
 
 def test_promote_golden_reminds_manual_ssot(monkeypatch, tmp_path) -> None:

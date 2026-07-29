@@ -589,3 +589,19 @@ def test_run_promptfoo_subset_rejects_incomplete_results(tmp_path, monkeypatch) 
             output_path=str(tmp_path / "out.json"),
             tmp_basename="test-subset-guard",
         )
+
+
+# ── item id 锚点（契约 §2.3：存量 id 优先，与 sync push 同语义）──
+
+
+def test_case_item_id_prefers_stored_id() -> None:
+    from eval_shared.cli.promptfoo_ab import _case_item_id
+    from eval_shared.common.dataset_item_id import compute_item_id
+
+    stored = {"id": "intention-regression-abc123", "vars": {"query": "脱敏后文本"}}
+    assert _case_item_id("intention-regression", stored) == "intention-regression-abc123"
+
+    no_id = {"vars": {"query": "a"}}
+    assert _case_item_id("intention-golden", no_id) == compute_item_id(
+        "intention-golden", {"query": "a"}
+    )

@@ -12,6 +12,19 @@
 
 ---
 
+## [Unreleased]
+
+> 语义澄清（#42④）：tag `v2.5.0` 指向 `efbf0ec`；其后 `24cb7ec`（子集结果数护栏测试 + README_EN 目录树补 dataset_promote.py，reviewer 核查门 P1/P2）为测试/文档补充，无行为变更、有意未 bump，随下一版本一并发布。
+
+### Added
+
+- **#39 方案 A（契约 §2.3 regression vars 口径，Gate2 批 2026-07-29）**：新增 `common/template_vars.py` 通用解析器——observation 消息数组按 per-agent 映射配置（业务仓 `agents/<agent>/datasets/var-mapping.yaml`，本包不内置 agent 名）解析为 promptfoo 可直接消费的 dict 型模板变量；`eval-dataset-promote --to regression` 双写前自动解析，解析失败该条硬失败（不写半程）。id 改基于解析后 vars 复算；`--to golden` 保持原行为。reviewer 核查门修复随批：**多轮观测显式处置**（契约④：历史轮丢弃 + `multi_turn` metadata 标记 + 促迁清单人工过目）、`query_var ≠ query` 硬失败（PII v1 范围钉死防裸奔）、末条 user 为 `# Context Information` 模板时的兜底护栏。
+
+### Fixed
+
+- **promptfoo-ab item id 锚点**：四处 id 复算改为**存量 `id` 优先**（`_case_item_id`，与 sync push 同语义）——本地 vars 一旦经 PII 脱敏，hash 复算会偏离镜像 id，run-item 挂空（reviewer P1-1，机制缝提前闭合）。
+- **sync-prompt pull 纯时间戳脏 diff**（#42③ 根治，08 期验收遗留）：内容/版本/标签均无变化时跳过写入，header 时间戳不再空转刷新；标签变化（如 staging 挪动）仍正常落盘；临时文件异常路径 try/finally 清理。
+
 ## [2.5.0] - 2026-07-28
 
 ### Fixed

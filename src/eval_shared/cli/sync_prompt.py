@@ -66,8 +66,28 @@ def _pull(client: LangfuseClient, agent: str, label: str | None) -> None:
         "",
     ])
 
-    dump_yaml(messages, out_path, header=header)
+    # 内容/版本/标签均无变化时跳过写入——header 的时间戳每次都会变，
+    # 直接覆盖会给业务仓留下纯时间戳脏 diff（08 期验收遗留，#42③ 根治）
+    tmp_path = out_path.with_suffix(".yaml.tmp")
     rel = out_path.relative_to(Path.cwd())
+    try:
+        dump_yaml(messages, tmp_path, header=header)
+        if out_path.exists():
+            strip_time = lambda text: [
+                line
+                for line in text.splitlines()
+                if not line.startswith("# 时间")
+            ]
+            if strip_time(out_path.read_text(encoding="utf-8")) == strip_time(
+                tmp_path.read_text(encoding="utf-8")
+            ):
+                click.echo(
+                    f"   ⏭️  v{data.get('version')} 内容无变化，跳过写入（不刷时间戳）  {rel}"
+                )
+                return
+        tmp_path.replace(out_path)
+    finally:
+        tmp_path.unlink(missing_ok=True)
     click.echo(
         f"   ✅ v{data.get('version')}  msgs={len(messages)}"
         f"  labels={labels_str}  →  {rel}"

@@ -24,6 +24,9 @@ eval-dataset-promote — 把 online-temp dataset 里指定 item 转入 golden �
   - 源 item 不删除（让 eval-online 下次跑时自动覆盖清理）
   - --to regression 默认同时回写本地 `agents/{agent}/datasets/regression.yaml`
     （本地 YAML=SSOT，契约 §2.3；用户话术经 PII 脱敏后入 git，Langfuse 镜像保持原文）
+  - --to regression 时 observation input（消息数组）按 `agents/{agent}/datasets/var-mapping.yaml`
+    解析为 dict 型模板变量再双写（契约 §2.3 regression vars 口径，#39 方案 A）；
+    解析失败该条硬失败，不写半程
 """
 
 from __future__ import annotations
@@ -37,6 +40,13 @@ from eval_shared.common.config import init_env
 from eval_shared.common.dataset_item_id import compute_item_id
 from eval_shared.common.langfuse_client import LangfuseClient
 from eval_shared.common.pii import scrub_user_content
+from eval_shared.common.template_vars import (
+    VarParseError,
+    is_multi_turn,
+    load_var_mapping,
+    parse_obs_input,
+    var_mapping_path,
+)
 from eval_shared.common.yaml_utils import load_yaml, dump_yaml
 
 
@@ -176,6 +186,18 @@ def main(
     if to_kind == "regression" and not local_write and not list_only:
         click.echo("⚠️  已关闭本地回写——契约 §2.3 要求 regression 双写，仅演练场景可这么干。")
 
+    mapping = None
+    if to_kind == "regression" and not list_only:
+        try:
+            mapping = load_var_mapping(agent)
+        except VarParseError as e:
+            raise click.ClickException(str(e))
+        if mapping is not None:
+            click.echo(
+                f"🗺  变量映射: {var_mapping_path(agent)}"
+                f"（query_var={mapping['query_var']}, sections={len(mapping['sections'])}）"
+            )
+
     click.echo(f"📂 源 : {source}")
     click.echo(f"📂 目标: {target}")
     if dry_run:
@@ -218,6 +240,24 @@ def main(
             src_expected = src_item.get("expectedOutput")
             src_meta = src_item.get("metadata") or {}
 
+            # regression vars 口径（契约 §2.3，#39 方案 A）：消息数组 → dict 型模板变量。
+            # 解析失败硬失败该条，Langfuse/本地都不写（不写半程、不猜测）
+            promote_input = src_input
+            src_multi_turn = False
+            if to_kind == "regression":
+                try:
+                    promote_input = parse_obs_input(src_input, mapping)
+                except VarParseError as e:
+                    click.echo(f"  ❌ 模板变量解析失败 {item_id}: {e}", err=True)
+                    fail += 1
+                    continue
+                src_multi_turn = is_multi_turn(src_input)
+                if src_multi_turn:
+                    click.echo(
+                        f"  ⚠️ 多轮观测 {item_id}：历史轮已丢弃（契约 §2.3④，"
+                        "回放语义弱于原始现场，trace 可回溯）"
+                    )
+
             target_meta = {
                 **src_meta,
                 "promoted_from": source,
@@ -225,19 +265,21 @@ def main(
                 "promoted_at": promoted_at,
                 "promoted_reason": reason,
             }
+            if src_multi_turn:
+                target_meta["multi_turn"] = True
 
             # 用 sync_dataset 同一算法计算目标 id，让后续 sync/重复 promote 幂等。
-            # list 型 input（Dify obs 的 messages 数组）也必须算 id，
-            # 否则 id=None 时 Langfuse 每次分配随机 id，重复 promote 产生重复 item（#17）
+            # regression 的 id 基于解析后的 dict vars（契约 §2.3）；golden 保持原行为，
+            # list 型 input 也必须算 id，否则 id=None 时 Langfuse 每次分配随机 id（#17）
             target_item_id = (
-                compute_item_id(target, src_input)
-                if isinstance(src_input, (dict, list))
+                compute_item_id(target, promote_input)
+                if isinstance(promote_input, (dict, list))
                 else None
             )
 
             body: dict[str, object] = {
                 "datasetName": target,
-                "input": src_input,
+                "input": promote_input,
                 "expectedOutput": src_expected,
                 "metadata": target_meta,
             }
@@ -267,7 +309,7 @@ def main(
 
             if do_local_write:
                 # 本地 SSOT 条目：Langfuse 镜像保持原文，入 git 的用户话术按契约 §2.3 脱敏
-                scrubbed_input, pii_changes = scrub_user_content(src_input)
+                scrubbed_input, pii_changes = scrub_user_content(promote_input)
                 for path_str, before, after in pii_changes:
                     click.echo(f"  🔒 PII {path_str}: {before!r} → {after!r}")
                 pii_hits += len(pii_changes)

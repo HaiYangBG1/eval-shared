@@ -201,6 +201,15 @@ def _normalize_var_value(v):
     return s
 
 
+def _case_item_id(dataset_name: str, case: dict) -> str:
+    """dataset item id：优先取 YAML 存量 `id`（契约 §2.3 幂等锚点，与 sync push 同语义）。
+
+    脱敏可能让本地 vars 的 hash 偏离镜像 id（id 基于未脱敏解析结果复算），
+    此时只有存量 id 能对上 Langfuse item——复算仅作无 id 条目的回退。
+    """
+    return case.get("id") or compute_item_id(dataset_name, case.get("vars", {}))
+
+
 def _vars_key(vars_data: dict) -> str:
     normalized = {k: _normalize_var_value(v) for k, v in vars_data.items()}
     return json.dumps(normalized, sort_keys=True, ensure_ascii=False)
@@ -234,7 +243,7 @@ def _merge_hit_and_miss(
         if not isinstance(case, dict):
             continue
         vars_data = case.get("vars", {})
-        item_id = compute_item_id(dataset_name, vars_data)
+        item_id = _case_item_id(dataset_name, case)
 
         if item_id in hits:
             trace_id = hits[item_id]
@@ -362,7 +371,7 @@ def _write_langfuse_run(
         if not isinstance(case, dict):
             continue
         vars_data = case.get("vars", {})
-        item_id = compute_item_id(dataset_name, vars_data)
+        item_id = _case_item_id(dataset_name, case)
         if item_id not in miss_set:
             continue
 
@@ -405,7 +414,7 @@ def _write_langfuse_run(
         if not isinstance(case, dict):
             continue
         vars_data = case.get("vars", {})
-        item_id = compute_item_id(dataset_name, vars_data)
+        item_id = _case_item_id(dataset_name, case)
         trace_id = item_id_to_trace.get(item_id)
         if not trace_id:
             continue
@@ -729,7 +738,7 @@ def main(
                 f"dataset YAML 不是数组结构: {local_dataset_path}"
             )
         all_item_ids = [
-            compute_item_id(dataset_name, c.get("vars", {}))
+            _case_item_id(dataset_name, c)
             for c in full_dataset
             if isinstance(c, dict)
         ]
