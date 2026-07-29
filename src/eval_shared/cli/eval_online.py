@@ -29,6 +29,7 @@ import click
 import httpx
 
 from eval_shared.common.config import init_env, get_langfuse_config, get_eval_model_config
+from eval_shared.common.template_vars import current_turn_view
 from eval_shared.common.langfuse_client import LangfuseClient
 from eval_shared.common.yaml_utils import load_yaml
 
@@ -288,6 +289,17 @@ def _process_evaluator(
 
         input_val = _extract_field(obs, evaluator.get("input", "$.input"))
         output_val = _extract_field(obs, evaluator.get("output", "$.output"))
+
+        # #44 拍板（2026-07-29）：多轮观测判官只评当轮——历史轮 rule_class/菜单陈旧，
+        # 整段喂判官会按首轮上下文误判后轮输出（S 族 374 条实锤）
+        if isinstance(input_val, list):
+            reduced = current_turn_view(input_val)
+            if reduced is not input_val:
+                if verbose:
+                    click.echo(
+                        f"   ✂️  多轮观测截当轮视图 {len(input_val)}→{len(reduced)} 条: {obs['id']}"
+                    )
+                input_val = reduced
 
         if not input_val and not output_val:
             if verbose:

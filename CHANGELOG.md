@@ -14,6 +14,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **#44 多轮观测判官只评当轮**（2026-07-29 拍板）：`template_vars.current_turn_view` 把多轮消息数组截为「system + 当轮 context 模板 + 当轮用户输入」（历史轮/assistant 全丢），`eval-online` 判官注入前自动应用——历史轮 rule_class/菜单陈旧导致的 S 族 374 条误判死根治。存量 16 条真实多轮 obs 回放 16/16 收敛（11 条消息→3 条、唯一 context 块）。测试 3 例。
+
 ### Fixed
 
 - **🔴 eval-online 时间窗过滤从未生效（BUGFIXES #17）**：observations API 时间参数误用 `fromTimestamp`（scores API 的参数名），服务端静默忽略 → 每次都在拉全史（实测 totalItems 3255 vs 9）。改 `fromStartTime` + MockTransport 测试钉住。历史「窗口体量超预期/连续达 limit」怪象同源；判官重校准「n=2579 基线」因此作废（97% 为 04~06 旧流量）。

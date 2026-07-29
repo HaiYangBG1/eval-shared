@@ -186,6 +186,48 @@ def test_assistant_turn_marks_multi_turn() -> None:
     ])
 
 
+def test_current_turn_view_single_turn_passthrough() -> None:
+    from eval_shared.common.template_vars import current_turn_view
+
+    single = _messages()  # [system, user(context), user(query)]，≤2 user 无 assistant
+    assert current_turn_view(single) is single
+    assert current_turn_view({"query": "非消息数组"}) == {"query": "非消息数组"}
+
+
+def test_current_turn_view_reduces_to_current_turn() -> None:
+    """#44：多轮 → system + 末个 context 消息 + 末条 user；历史轮/assistant 全丢。"""
+    from eval_shared.common.template_vars import current_turn_view
+
+    old_ctx = "# Context Information\n\n## 2. [Rule Class]\n\n双人餐（陈旧首轮）"
+    new_ctx = "# Context Information\n\n## 2. [Rule Class]\n\n单人餐（当轮）"
+    msgs = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": old_ctx},
+        {"role": "user", "content": "两个人吃"},
+        {"role": "assistant", "content": "好的双人餐…"},
+        {"role": "user", "content": new_ctx},
+        {"role": "user", "content": "换成我一个人吃"},
+    ]
+    view = current_turn_view(msgs)
+    assert [m["role"] for m in view] == ["system", "user", "user"]
+    assert view[1]["content"] == new_ctx  # 只保留当轮 context，陈旧 rule_class 不进判官
+    assert view[2]["content"] == "换成我一个人吃"
+
+
+def test_current_turn_view_without_context_message() -> None:
+    from eval_shared.common.template_vars import current_turn_view
+
+    msgs = [
+        {"role": "system", "content": "s"},
+        {"role": "user", "content": "推荐当季新品"},
+        {"role": "assistant", "content": "好的…"},
+        {"role": "user", "content": "这不好吃"},
+    ]
+    view = current_turn_view(msgs)
+    assert [m["role"] for m in view] == ["system", "user"]
+    assert view[1]["content"] == "这不好吃"
+
+
 def test_three_user_turns_marks_multi_turn() -> None:
     assert is_multi_turn([
         {"role": "user", "content": "# Context Information …"},

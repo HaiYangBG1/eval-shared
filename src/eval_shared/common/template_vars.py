@@ -73,6 +73,31 @@ def is_multi_turn(value: object) -> bool:
     return "assistant" in roles or roles.count("user") > 2
 
 
+_CONTEXT_HEAD = "# Context Information"
+
+
+def current_turn_view(messages: object) -> object:
+    """多轮消息数组 → 当轮视图：system + 末个 context 模板 user 消息 + 末条 user 消息。
+
+    #44 拍板（2026-07-29）：判官只评当轮——历史轮的 rule_class/菜单已陈旧，
+    整段喂判官会按首轮上下文误判后轮输出（S 族 374 条误判死实锤）。
+    单轮消息 / 非消息数组原样返回；assistant 轮与历史 user 轮全部丢弃。
+    """
+    if not is_multi_turn(messages):
+        return messages
+    keep = [m for m in messages if isinstance(m, dict) and m.get("role") == "system"]
+    users = [m for m in messages if isinstance(m, dict) and m.get("role") == "user"]
+    ctx = [
+        m for m in users
+        if str(m.get("content", "")).lstrip().startswith(_CONTEXT_HEAD)
+    ]
+    if ctx and ctx[-1] is not users[-1]:
+        keep.append(ctx[-1])
+    if users:
+        keep.append(users[-1])
+    return keep
+
+
 def _section_header_re(title: str) -> re.Pattern[str]:
     # 匹配 `## 1. [Menu Data] (门店菜单)` 一类的段落标题行；序号可缺省
     return re.compile(
